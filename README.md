@@ -1,32 +1,39 @@
 # SUD-Zeitleiste
 
-Portierbare deutschsprachige SUD-Zeitleiste (Alter 0–37, Belastung 0–10) mit Ereignissen, Notizen, Clustern und JSON-, CSV-, HTML- sowie XLSX-Export.
+Interaktive Zeitleiste für Alter 0 bis 37 und SUD-Werte 0 bis 10. Ereignisse, Notizen, Cluster, Datenimport und JSON-/CSV-/XLSX-/Offline-HTML-Export.
 
-## Vercel-Setup
+## Hosting
 
-Dieses Repository ist direkt auf Vercel deploybar (Framework: Other, kein Build-Schritt).
+Deployment: Vercel, Framework Other, kein Build-Schritt, GitHub-Neudeploy bei Push auf `main`.
 
-1. Einen **privaten** Vercel Blob Store mit dem Projekt verbinden. Vercel setzt dabei die Umgebungsvariable BLOB_READ_WRITE_TOKEN.
-2. Einen zufälligen Zugangsschlüssel (mindestens 40 Zeichen) als SUD_ACCESS_TOKEN in den Vercel-Umgebungsvariablen hinterlegen.
-3. Erneut deployen, um beide Variablen für die Funktionen zu aktivieren.
-4. Vercel Authentication für die Webseite eingeschaltet lassen.
-5. Auf der Webseite den Cloud-Zugangsschlüssel und ein eigenes, anderes Verschlüsselungspasswort (mindestens 12 Zeichen) eingeben.
-6. Bei leerer Cloud erstmals speichern. Auf weiteren Geräten zuerst aus der Cloud laden. Automatische Synchronisierung ist optional.
+Die Anwendung verwendet ein einziges gemeinsam festgelegtes Passwort. Jeder, der dieses Passwort kennt, kann auf denselben Datenbestand zugreifen und ihn verändern. Eine Vercel-Anmeldung ist für Besucher nicht erforderlich.
 
-Die Verschlüsselung geschieht nur im Browser mit AES-256-GCM. Der Schlüssel wird per PBKDF2/SHA-256, 310.000 Iterationen und zufälligem Salt aus dem Verschlüsselungspasswort abgeleitet. Vercel erhält nur verschlüsselte Daten. Das Verschlüsselungspasswort wird nie an die API gesendet.
+Serverfunktionen:
 
-Vercel Blob ist privat, die API authentifiziert jede Anfrage zusätzlich mit einem Zugangsschlüssel und verwendet ETags für konfliktgeschütztes Speichern. Bei parallelen Bearbeitungen wird nicht stillschweigend überschrieben.
+- `api/auth.js`: Passwort-Ersteinrichtung über einen einmaligen, geheimen Einrichtungslink, Login, Passwortwechsel und Logout.
+- `api/data.js`: Private Lese- und Schreibzugriffe mit signierter Sitzung, konfliktgeschützten ETags und serverseitiger AES-256-GCM-Verschlüsselung.
+- `lib/auth.js`: PBKDF2-SHA256-Passworthash, 310000 Iterationen, zufälliges Salt. Sichere HttpOnly-Cookies mit HMAC-Signatur, `SameSite=Strict`, eine Woche Gültigkeit.
+- `cloud.js`: Automatisches Laden, Speichern nach Änderungen und minimalistisches Passwortfenster.
 
-## Lokale Nutzung
+Persistenz: **Vercel Blob (private)**. Keine Supabase-Datenbank, keine Cloud-Setup-Eingabefelder in der Oberfläche.
 
-Ohne Cloud funktioniert die HTML-Anwendung weiter, auch offline. Daten werden im lokalen Browser-Speicher gespeichert. Exportierte HTML-, JSON-, CSV- und Excel-Dateien sowie der lokale Browser-Speicher sind **unverschlüsselt**. Sichere diese Dateien passend zu ihrem vertraulichen Inhalt.
+## Benötigte Vercel-Umgebungsvariablen
 
-JSON- und Excel-Dateien lassen sich wieder importieren. Der HTML-Export mit Daten erzeugt eine einzelne eigenständig ausführbare Datei.
+- `BLOB_READ_WRITE_TOKEN`: durch verbundene private Blob Storage erzeugt.
+- `SUD_BOOTSTRAP_TOKEN`: zufälliges Einmaltoken für den Link zum anfänglichen Festlegen des Passworts.
+- `SUD_SESSION_SECRET`: zufälliges HMAC-Secret zum Unterschreiben der Session-Cookies.
+- `SUD_DATA_KEY`: zufälliger AES-Schlüssel, als Base64 kodiert (32 Byte).
 
-Das Verschlüsselungspasswort ist nicht wiederherstellbar. Daher zusätzlich ein geschütztes lokales Backup aufbewahren.
+Die Variablen gehören ausschließlich in die Vercel-Projekteinstellungen und niemals ins Repository. Nach erstmaliger Passworterstellung hat der Einrichtungslink keine Funktion mehr. Das Passwort selbst wird nicht im Klartext gespeichert.
 
-## Prüfung
+## Datensicherung
 
-Nach dem Deployment Punkte mit SUD 0 und 10 erstellen, Cluster zuordnen, JSON/XLSX exportieren und wieder importieren, Cloud speichern und in einem zweiten Browser aus der Cloud laden. Bei einem veralteten Stand soll die Cloud einen Konflikt melden.
+Cloud-Daten werden serverseitig verschlüsselt im privaten Blob Store abgelegt. Lokale Browser-Kopien sowie exportierte JSON-, CSV-, XLSX- und HTML-Dateien sind nicht verschlüsselt. Sichere diese Dateien geschützt und exportiere bei Bedarf eine eigene Kopie.
 
-Das Werkzeug dient der persönlichen Dokumentation, nicht der Diagnostik. Die Anwendung sollte vor produktivem Einsatz mit sensiblen Informationen zusätzlich an der realen Konfiguration geprüft werden.
+Die Offline-HTML-Datei funktioniert ohne Vercel und ohne Passwortdialog. Sie enthält die Daten der aktuellen Momentaufnahme. Sie kann nichts in der Cloud verändern.
+
+## Einschränkungen
+
+Es handelt sich um eine gemeinsame Arbeitsmappe ohne getrennte Nutzerprofile. Alle mit dem Passwort sehen und bearbeiten denselben Datenbestand. Gleichzeitige Änderungen können einen ETag-Konflikt ergeben, der nicht automatisch überschrieben wird. Vor Wechseln zwischen Geräten sicherstellen, dass alle Änderungen gespeichert wurden.
+
+Das Werkzeug dient der persönlichen Dokumentation. Die Belastungswerte sind subjektiv und keine klinische Diagnose.
