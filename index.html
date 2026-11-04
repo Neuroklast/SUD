@@ -19,25 +19,24 @@
 @media(max-width:1020px){.layout{grid-template-columns:minmax(0,1fr)}.sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.sidebar>.panel:last-child{grid-column:span 2}}@media(max-width:700px){.shell{padding:16px 12px 40px}header{flex-direction:column}.top-actions{justify-content:flex-start}.summary{gap:7px}.stat{padding:10px;display:block}.stat strong{font-size:21px;display:block}.stat span{font-size:10px}.panel-pad{padding:14px}.sidebar{display:flex}.plot-tools{display:block}.plot-tools .right{margin-top:10px}.chart-foot{display:block}.chart-foot span{display:block;margin-bottom:5px}}
 @media print{.sidebar,.top-actions,.plot-tools,.chart-foot,.privacy,.footer{display:none!important}.shell{max-width:none;padding:0}.layout{display:block}.panel{border:0;background:white}.plot-wrap{overflow:visible;border:0}#chart{transform-origin:left top;transform:scale(.73)}body{background:white}}
 
-.cloud-section{display:none;background:linear-gradient(130deg,#181e2b,#101722);border:1px solid #45566a;border-radius:13px;padding:16px 18px;margin-bottom:17px}
-.cloud-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}
-.cloud-head h2{font-size:15px;margin:0;color:#dcecf7}
-.cloud-desc{color:#abb9ca;font-size:12px;margin:0 0 13px}
-.cloud-grid{display:grid;grid-template-columns:minmax(200px,1fr) minmax(200px,1fr);gap:11px}
-.cloud-grid label{display:block;font-weight:600;font-size:11px;color:#c8d5e3}
-.cloud-grid input{display:block;width:100%;margin-top:5px;background:#0c121b;border:1px solid #46536a;border-radius:7px;padding:9px 10px;color:white}
-.cloud-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:12px}
-.cloud-status{font-size:12px;color:#b1bdc9}
-.cloud-hint{font-size:11px;color:#9eaabe;margin-top:10px}
-@media(max-width:700px){.cloud-grid{grid-template-columns:1fr}}
 
+.locked .shell{display:none!important}
+#auth-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#0b0e14}
+#auth-screen[hidden]{display:none}
+#auth-screen .access-box{width:min(100%,390px);background:#141923;border:1px solid #354154;border-radius:16px;padding:30px;box-shadow:0 20px 70px #0006}
+#auth-screen h1{margin:0 0 22px;font-size:27px;letter-spacing:-.05em}
+#auth-screen input{width:100%;padding:13px;background:#0d121a;color:#fff;border:1px solid #435165;border-radius:8px;margin-bottom:14px}
+#auth-screen .access-buttons{display:flex;gap:9px}
+#access-message{color:#ffaaa8;font-size:12px;min-height:17px;margin:12px 0 0}
+#access-cancel[hidden]{display:none}
 </style>
 </head>
-<body>
+<body class="locked">
+<div id="auth-screen"><form id="access-form" class="access-box"><h1 id="access-title">SUD</h1><input id="access-password" name="password" type="password" aria-label="Passwort" autocomplete="current-password" minlength="12" required placeholder="Passwort"><div class="access-buttons"><button class="btn primary" id="access-submit" type="submit">Öffnen</button><button class="btn ghost" id="access-cancel" type="button" hidden>Abbrechen</button></div><p id="access-message" role="status"></p></form></div>
 <script type="application/json" id="embedded-data">null</script>
 <div class="shell">
 <header>
- <div><div class="eyebrow"><span class="line"></span> PERSÖNLICHE ZEITLEISTE · LOKAL / CLOUD</div><h1 class="title">SUD <span style="font-weight:370;color:#aeb8c5">/ Belastungsverlauf</span></h1><p class="subtitle">Lebensjahre 0–37. Erlebnisse als Punkte setzen, mit Text versehen und über farbige Cluster miteinander verbinden. Daten lokal bearbeiten und bei Bedarf Ende-zu-Ende-verschlüsselt auf Vercel sichern.</p></div>
+ <div><div class="eyebrow"><span class="line"></span> PERSÖNLICHE ZEITLEISTE</div><h1 class="title">SUD <span style="font-weight:370;color:#aeb8c5">/ Belastungsverlauf</span></h1></div>
  <div class="top-actions" aria-label="Dateiaktionen">
   <button class="btn" id="import-btn" title="Vorhandene JSON- oder Excel-Datei laden"><span class="sym">↥</span> Importieren</button>
   <button class="btn" id="json-btn" title="Sicherung als JSON-Datei"><span class="sym">⤓</span> JSON</button>
@@ -45,17 +44,7 @@
   <button class="btn primary" id="html-btn" title="Komplette Anwendung einschließlich aktueller Daten in einer einzigen HTML-Datei sichern"><span class="sym">⤓</span> HTML mit Daten sichern</button>
  </div>
 </header>
-<section id="cloud-section" class="cloud-section" aria-label="Vercel Cloud-Sicherung" hidden>
- <div class="cloud-head"><h2>Private Cloud-Sicherung</h2><span class="mini-label">Vercel Blob · verschlüsselt</span></div>
- <p class="cloud-desc">Zwei getrennte Passwörter: Der Zugangsschlüssel berechtigt zum Speichern. Das Verschlüsselungspasswort bleibt im Browser und schützt den Inhalt. Die Nutzung ohne Cloud bleibt möglich.</p>
- <div class="cloud-grid">
-  <label for="cloud-access">Cloud-Zugangsschlüssel<input id="cloud-access" type="password" autocomplete="off" spellcheck="false" placeholder="Zugangsschlüssel aus Vercel"></label>
-  <label for="cloud-pass">Verschlüsselungspasswort<input id="cloud-pass" type="password" autocomplete="new-password" placeholder="Eigenes, sicheres Passwort (min. 12 Zeichen)"></label>
- </div>
- <div class="cloud-actions"><button class="btn" id="cloud-load" type="button">Aus Cloud laden</button><button class="btn primary" id="cloud-save" type="button">In Cloud speichern</button><label class="mini-label" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="cloud-auto">Automatisch synchronisieren</label></div>
- <div class="cloud-actions"><span id="cloud-status" class="cloud-status" role="status" aria-live="polite">Cloud nicht verbunden. Lokale Bearbeitung jederzeit möglich.</span></div>
- <p class="cloud-hint">Wichtig: Ohne Verschlüsselungspasswort können Cloud-Daten nicht wiederhergestellt werden. Ein JSON-/HTML-Backup zusätzlich aufbewahren. Cloud-Daten werden bei der Übertragung und auf Vercel verschlüsselt gespeichert.</p>
-</section>
+
 <section class="summary" aria-label="Übersicht">
  <div class="stat"><strong id="event-count">0</strong><span>Erlebnisse eingetragen</span></div>
  <div class="stat"><strong id="cluster-count">0</strong><span>Cluster angelegt</span></div>
@@ -67,13 +56,16 @@
   <div class="panel-heading"><h2>Deine Zeitleiste</h2><span class="kicker">SUD 0–10 · ALTER 0–37</span></div>
   <div class="plot-tools"><div class="left"><span class="mini-label">Ansicht</span><select id="filter-cluster" class="inline-select" aria-label="Cluster auswählen"><option value="all">Alle Erlebnisse</option></select><button class="btn small ghost" id="reset-view">Filter zurücksetzen</button></div><div class="right"><input class="search" id="search" type="search" placeholder="Nach Eintrag suchen …" aria-label="Erlebnisse durchsuchen"><button class="btn small" id="new-event">+ Eintrag</button></div></div>
   <div class="plot-wrap" id="plot-wrap"><svg id="chart" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 505" role="img" aria-label="Interaktives SUD-Diagramm. Per Klick auf einen Rasterpunkt Eintrag erstellen."></svg></div>
-  <div class="chart-foot"><span><strong>Bedienung:</strong> Im Diagramm auf Jahr und SUD-Wert klicken. Bestehende Punkte anklicken, um sie zu bearbeiten. Bei vielen Punkten horizontal scrollen.</span><span id="save-status" class="status" role="status">Lokal bereit</span></div>
+  <div class="chart-foot">
+<div class="buttonrow"><button class="btn small ghost" id="copy-btn">JSON kopieren</button><button class="btn small ghost" id="csv-btn">CSV exportieren</button><button class="btn small ghost" id="clear-btn">Alle Daten löschen</button><button class="btn small ghost" id="save-cloud">Speichern</button><button class="btn small ghost" id="change-password">Passwort ändern</button><button class="btn small ghost" id="sign-out">Sperren</button></div>
+<span id="save-status" class="status" role="status">Bereit</span>
+
  </section>
- <section class="panel panel-pad info-section"><h3>So funktioniert es</h3><p>Jeder Punkt steht für ein Ereignis und den dazu eingetragenen SUD-Wert. Mehrere Punkte können im selben Jahr und auf derselben Skalenstufe liegen. Cluster zeichnen Verbindungen zwischen zusammengehörenden Punkten. Der Wert ist eine persönliche Einschätzung, keine Diagnose.</p><div class="buttonrow"><button class="btn small ghost" id="copy-btn">Daten als JSON kopieren</button><button class="btn small ghost" id="csv-btn">CSV exportieren</button><button class="btn small ghost" id="clear-btn">Alle Daten löschen</button></div><div class="privacy"><strong>Privatsphäre und Sicherung</strong>Die automatische Speicherung im Browser ist nur für dieses Browserprofil gedacht. Sie reist beim Kopieren der HTML-Datei nicht mit. Dafür bitte <b>„HTML mit Daten sichern“</b> oder <b>„JSON“</b> verwenden. Exportdateien enthalten persönliche Inhalte im Klartext. Gib sie nur bewusst weiter und lege sie geschützt ab. Es gibt keine Cloud-Verbindung.</div></section>
+ 
  </main>
  <aside class="sidebar">
   <section class="panel panel-pad" aria-label="Eintrag bearbeiten"><div class="panel-heading"><h2 id="editor-title">Eintrag</h2><span class="kicker" id="editor-mode">NEU / BEARBEITEN</span></div>
-   <div id="editor-empty" class="eventform-empty"><strong>Noch kein Eintrag ausgewählt</strong><p>Klicke auf eine Stelle im Diagramm oder auf „+ Eintrag“. Der Alters- und SUD-Wert wird automatisch übernommen.</p><button class="btn small" id="empty-new">+ Eintrag erstellen</button></div>
+   <div id="editor-empty" class="eventform-empty"><strong>Noch kein Eintrag ausgewählt</strong><button class="btn small" id="empty-new">+ Eintrag erstellen</button></div>
    <form id="event-form" hidden>
     <div class="field"><label for="event-title">Bezeichnung *</label><input id="event-title" maxlength="140" required placeholder="Kurzer Titel"></div>
     <div class="form-cols"><div class="field"><label for="event-age">Alter in Jahren *</label><input id="event-age" type="number" inputmode="numeric" step="1" min="0" max="37" required></div><div class="field"><label for="event-sud">SUD-Wert *</label><select id="event-sud" required><option value="10">10 · sehr hoch</option><option value="9">9</option><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1 · niedrig</option><option value="0">0 · keine Belastung</option></select></div></div>
@@ -82,17 +74,17 @@
     <div class="buttonrow"><button class="btn primary" type="submit">Eintrag speichern</button><button class="btn ghost" type="button" id="cancel-event">Schließen</button><button class="btn danger" type="button" id="delete-event" hidden>Löschen</button></div>
    </form>
   </section>
-  <section class="panel panel-pad" aria-label="Cluster verwalten"><div class="panel-heading"><h2>Cluster</h2><button class="btn small" id="new-cluster">+ Cluster</button></div><div id="cluster-list" class="clusters"></div><p class="subtle">Beispiel: Ein Cluster wie „Mobbing“ kann mehrere Ereignisse aus unterschiedlichen Jahren enthalten. Eine Zuordnung zu mehreren Clustern ist möglich.</p></section>
+  <section class="panel panel-pad" aria-label="Cluster verwalten"><div class="panel-heading"><h2>Cluster</h2><button class="btn small" id="new-cluster">+ Cluster</button></div><div id="cluster-list" class="clusters"></div></section>
   <section class="panel panel-pad" aria-label="Ereignisliste"><div class="panel-heading"><h2>Einträge</h2><span id="visible-count" class="kicker">0 SICHTBAR</span></div><div id="event-list" class="list-scroller"></div></section>
  </aside>
 </div>
-<footer class="footer">Persönliches Dokument · komplett offline · keine Anmeldung · keine externen Abhängigkeiten</footer>
+
 </div>
 <div class="modal-shade" id="cluster-modal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cluster-dialog-title"><h2 id="cluster-dialog-title">Cluster erstellen</h2><form id="cluster-form"><div class="field"><label for="cluster-name">Name *</label><input id="cluster-name" maxlength="100" required placeholder="z. B. Mobbing"></div><div class="field"><label for="cluster-notes">Beschreibung (optional)</label><textarea id="cluster-notes" maxlength="2000" placeholder="Was verbindet diese Ereignisse?"></textarea></div><div class="field"><label>Farbe</label><div id="color-choices" class="palette"></div></div><div class="buttonrow"><button type="submit" class="btn primary">Cluster speichern</button><button id="cluster-cancel" type="button" class="btn ghost">Abbrechen</button><button id="cluster-delete" type="button" class="btn danger" hidden>Cluster löschen</button></div></form></div></div>
 <input id="file-picker" hidden type="file" accept=".json,.csv,.xlsx,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
 <script>
 'use strict';
-/* Portable SUD timeline. No dependencies and no remote requests. */
+/* Portable SUD timeline; standalone exports work offline. */
 const STORAGE_KEY='portable-sud-timeline-v1';
 const COLORS=['#ef8682','#92b9e8','#a994ef','#79bfae','#f0b67c','#d8a5c4','#b5c77f','#dfa68f'];
 const emptyData=()=>({version:1,events:[],clusters:[]});
@@ -285,7 +277,7 @@ function downloadBlob(blob,file){const url=URL.createObjectURL(blob);const a=doc
 function downloadText(text,file,type){downloadBlob(new Blob([text],{type}),file)}
 $('json-btn').addEventListener('click',()=>downloadText(JSON.stringify(data,null,2),'SUD_Zeitleiste_'+datePart()+'.json','application/json;charset=utf-8'));
 $('html-btn').addEventListener('click',()=>{
- const clone=document.documentElement.cloneNode(true);const cloudCopy=clone.querySelector('#cloud-section');if(cloudCopy){cloudCopy.hidden=true;cloudCopy.removeAttribute('style');}clone.querySelector('#embedded-data').textContent=JSON.stringify(data).replace(/</g,'\\u003c');
+ const clone=document.documentElement.cloneNode(true);clone.querySelector('#auth-screen')?.remove();clone.querySelector('script[src="/cloud.js"]')?.remove();clone.body?.classList.remove('locked');clone.querySelector('#embedded-data').textContent=JSON.stringify(data).replace(/</g,'\\u003c');
  const html='<!DOCTYPE html>\n'+clone.outerHTML;
  downloadText(html,'SUD_Zeitleiste_mit_Daten_'+datePart()+'.html','text/html;charset=utf-8');setStatus('Eigenständige HTML-Datei mit Daten erstellt');
 });
