@@ -184,7 +184,7 @@
       }
     } catch (error) {
       el('access-message').textContent = error.message;
-      if (changeMode) show('change');
+      // Keep the error visible in the password form.
     } finally {
       el('access-submit').disabled = false;
       el('access-password').value = '';
