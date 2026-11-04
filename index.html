@@ -277,7 +277,7 @@ function downloadBlob(blob,file){const url=URL.createObjectURL(blob);const a=doc
 function downloadText(text,file,type){downloadBlob(new Blob([text],{type}),file)}
 $('json-btn').addEventListener('click',()=>downloadText(JSON.stringify(data,null,2),'SUD_Zeitleiste_'+datePart()+'.json','application/json;charset=utf-8'));
 $('html-btn').addEventListener('click',()=>{
- const clone=document.documentElement.cloneNode(true);clone.querySelector('#auth-screen')?.remove();clone.querySelector('script[src="/cloud.js"]')?.remove();clone.body?.classList.remove('locked');clone.querySelector('#embedded-data').textContent=JSON.stringify(data).replace(/</g,'\\u003c');
+ const clone=document.documentElement.cloneNode(true);clone.querySelector('#auth-screen')?.remove();clone.querySelector('script[src="/cloud.js"]')?.remove();clone.querySelector('body')?.classList.remove('locked');clone.querySelector('#embedded-data').textContent=JSON.stringify(data).replace(/</g,'\\u003c');
  const html='<!DOCTYPE html>\n'+clone.outerHTML;
  downloadText(html,'SUD_Zeitleiste_mit_Daten_'+datePart()+'.html','text/html;charset=utf-8');setStatus('Eigenständige HTML-Datei mit Daten erstellt');
 });
