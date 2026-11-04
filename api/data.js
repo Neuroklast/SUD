@@ -1,78 +1,81 @@
 import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
-import { timingSafeEqual } from 'node:crypto';
+import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { json, readPasswordRecord, validSession, rejectCrossOrigin } from '../lib/auth.js';
 
-const PATH = 'sud/private-timeline.json';
+const PATH = 'sud/timeline-v2.json';
 const LIMIT = 750_000;
-const denyCache = { 'Cache-Control': 'no-store, max-age=0', 'X-Content-Type-Options': 'nosniff' };
 
-function send(res, status, value) {
-  res.statusCode = status;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  for (const [name, val] of Object.entries(denyCache)) res.setHeader(name, val);
-  res.end(JSON.stringify(value));
+function key() {
+  const value = Buffer.from(process.env.SUD_DATA_KEY || '', 'base64');
+  if (value.length !== 32) throw new Error('Invalid data encryption key');
+  return value;
 }
-
-function equalSecret(given, expected) {
-  if (!given || !expected || given.length > 256 || expected.length > 256) return false;
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
-  return a.length === b.length && timingSafeEqual(a, b);
+function pack(data) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key(), iv);
+  const ciphertext = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
+  return JSON.stringify({ format: 'sud-storage-v2', iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') });
 }
-
-function validEnvelope(p) {
-  if (!p || typeof p !== 'object' || Array.isArray(p) || p.format !== 'sud-aes-gcm-v1') return false;
-  return ['salt', 'iv', 'ciphertext'].every(k => typeof p[k] === 'string' && /^[A-Za-z0-9+/=]+$/.test(p[k])) &&
-    p.salt.length >= 20 && p.salt.length <= 32 && p.iv.length >= 16 && p.iv.length <= 24 &&
-    p.ciphertext.length < LIMIT;
+function unpack(raw) {
+  const envelope = JSON.parse(raw);
+  if (envelope.format !== 'sud-storage-v2') throw new Error('Unsupported storage format');
+  const decipher = createDecipheriv('aes-256-gcm', key(), Buffer.from(envelope.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+  return JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
+}
+function validData(value) {
+  return value && typeof value === 'object' &&
+    Number(value.version) === 1 && Array.isArray(value.events) && Array.isArray(value.clusters) &&
+    value.events.length <= 20_000 && value.clusters.length <= 1500;
 }
 
 export default async function handler(req, res) {
-  if (!['GET', 'PUT'].includes(req.method)) {
+  if (req.method !== 'GET' && req.method !== 'PUT') {
     res.setHeader('Allow', 'GET, PUT');
-    return send(res, 405, { error: 'Methode nicht erlaubt' });
+    return json(res, 405, { error: 'Nicht erlaubt' });
   }
-  if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.SUD_ACCESS_TOKEN) {
-    return send(res, 503, { error: 'Cloud-Speicher noch nicht konfiguriert' });
+  if (req.method === 'PUT' && (rejectCrossOrigin(req) ||
+      !String(req.headers['content-type'] || '').startsWith('application/json'))) {
+    return json(res, 403, { error: 'Anfrage nicht erlaubt' });
   }
-  const authorization = String(req.headers.authorization || '');
-  const match = /^Bearer ([A-Za-z0-9_-]{40,256})$/.exec(authorization);
-  if (!match || !equalSecret(match[1], process.env.SUD_ACCESS_TOKEN)) {
-    return send(res, 401, { error: 'Ungültiger Zugangsschlüssel' });
+  if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.SUD_SESSION_SECRET || !process.env.SUD_DATA_KEY) {
+    return json(res, 503, { error: 'Speicher nicht bereit' });
   }
   try {
+    const record = await readPasswordRecord();
+    if (!validSession(req, record)) return json(res, 401, { error: 'Anmeldung erforderlich' });
     if (req.method === 'GET') {
       const file = await get(PATH, { access: 'private', useCache: false });
-      if (!file || file.statusCode === 404) return send(res, 200, { data: null, etag: null });
-      if (file.statusCode !== 200 || !file.stream) return send(res, 502, { error: 'Speicher konnte nicht gelesen werden' });
+      if (!file || file.statusCode === 404) return json(res, 200, { data: null, etag: null });
+      if (file.statusCode !== 200 || !file.stream) return json(res, 502, { error: 'Daten nicht verfügbar' });
       const raw = await new Response(file.stream).text();
-      if (raw.length > LIMIT) return send(res, 502, { error: 'Datensatz zu groß' });
-      const data = JSON.parse(raw);
-      if (!validEnvelope(data)) return send(res, 502, { error: 'Ungültiges gespeichertes Datenformat' });
-      return send(res, 200, { data, etag: file.blob.etag || null });
+      if (raw.length > LIMIT * 2) return json(res, 502, { error: 'Datensatz zu groß' });
+      const data = unpack(raw);
+      if (!validData(data)) return json(res, 502, { error: 'Ungültiger Datensatz' });
+      return json(res, 200, { data, etag: file.blob.etag });
     }
-    if (Number(req.headers['content-length'] || 0) > LIMIT) return send(res, 413, { error: 'Datei zu groß' });
+    if (Number(req.headers['content-length'] || 0) > LIMIT) return json(res, 413, { error: 'Datei zu groß' });
     const input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    if (!input || !validEnvelope(input.data)) return send(res, 400, { error: 'Ungültiger verschlüsselter Datensatz' });
-    const dataString = JSON.stringify(input.data);
-    if (Buffer.byteLength(dataString) > LIMIT) return send(res, 413, { error: 'Datei zu groß' });
+    if (!input || !validData(input.data)) return json(res, 400, { error: 'Ungültige Einträge' });
+    const serialized = JSON.stringify(input.data);
+    if (Buffer.byteLength(serialized, 'utf8') > LIMIT) return json(res, 413, { error: 'Datei zu groß' });
     const etag = input.etag;
-    if (etag !== null && etag !== undefined && (typeof etag !== 'string' || etag.length > 200 || !/^[\w"\/-]+$/.test(etag))) {
-      return send(res, 400, { error: 'Ungültige Datenversion' });
+    if (etag !== null && etag !== undefined &&
+        (typeof etag !== 'string' || etag.length > 200 || !/^[A-Za-z0-9"\/_=-]+$/.test(etag))) {
+      return json(res, 400, { error: 'Ungültige Datenversion' });
     }
-    // On the very first write, an existing blob must not be overwritten.
-    // For all later writes, ETag preconditions stop silent lost updates.
-    const options = { access: 'private', contentType: 'application/json',
-      cacheControlMaxAge: 60, allowOverwrite: Boolean(etag) };
-    if (etag) options.ifMatch = etag;
-    await put(PATH, dataString, options);
-    const fresh = await get(PATH, { access: 'private', useCache: false });
-    if (fresh?.stream) await fresh.stream.cancel();
-    return send(res, 200, { ok: true, etag: fresh?.blob?.etag || null });
-  } catch (err) {
-    if (err instanceof BlobPreconditionFailedError || /already exists|precondition|condition not met|conflict/i.test(err.message || '')) {
-      return send(res, 409, { error: 'Die Cloud-Daten wurden inzwischen geändert. Bitte erst neu laden und Änderungen zusammenführen.' });
+    const saved = await put(PATH, pack(input.data), {
+      access: 'private', contentType: 'application/json', allowOverwrite: Boolean(etag),
+      ...(etag ? { ifMatch: etag } : {}), cacheControlMaxAge: 60
+    });
+    return json(res, 200, { ok: true, etag: saved.etag });
+  } catch (error) {
+    if (error instanceof BlobPreconditionFailedError ||
+        /already exists|precondition|condition not met|conflict/i.test(error.message || '')) {
+      return json(res, 409, { error: 'Die Daten wurden inzwischen auf einem anderen Gerät geändert.' });
     }
-    console.error('Cloud-Speicher: Fehlercode', err?.name || 'UnknownError');
-    return send(res, 500, { error: 'Cloud-Speicher derzeit nicht verfügbar' });
+    console.error('Data operation failed:', error?.name || 'UnknownError');
+    return json(res, 500, { error: 'Speichern gerade nicht möglich' });
   }
 }
