@@ -1,5 +1,5 @@
 import {
-  json, rejectCrossOrigin, passwordValid, readPasswordRecord, checkPassword,
+  json, rejectCrossOrigin, passwordValid, safeEqual, readPasswordRecord, checkPassword,
   initialSetup, updatePassword, createSession, clearSession, validSession
 } from '../lib/auth.js';
 
@@ -51,6 +51,7 @@ export default async function handler(req, res) {
     }
     if (input.action === 'change') {
       if (!validSession(req, record)) return json(res, 401, { error: 'Anmeldung erforderlich' });
+      if (!safeEqual(input.setupToken, process.env.SUD_BOOTSTRAP_TOKEN)) return json(res, 403, { error: 'Nur der Einrichtungslink darf das Passwort ändern' });
       if (!passwordValid(input.password)) return json(res, 400, { error: 'Mindestens 12 Zeichen erforderlich' });
       await updatePassword(input.password, record);
       const updated = await readPasswordRecord();
