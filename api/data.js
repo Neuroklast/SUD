@@ -1,4 +1,4 @@
-import { get, put, head, BlobPreconditionFailedError } from '@vercel/blob';
+import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
 import { timingSafeEqual } from 'node:crypto';
 
 const PATH = 'sud/private-timeline.json';
@@ -65,8 +65,9 @@ export default async function handler(req, res) {
       cacheControlMaxAge: 60, allowOverwrite: Boolean(etag) };
     if (etag) options.ifMatch = etag;
     await put(PATH, dataString, options);
-    const metadata = await head(PATH);
-    return send(res, 200, { ok: true, etag: metadata?.etag || null });
+    const fresh = await get(PATH, { access: 'private', useCache: false });
+    if (fresh?.stream) await fresh.stream.cancel();
+    return send(res, 200, { ok: true, etag: fresh?.blob?.etag || null });
   } catch (err) {
     if (err instanceof BlobPreconditionFailedError || /already exists|precondition|condition not met|conflict/i.test(err.message || '')) {
       return send(res, 409, { error: 'Die Cloud-Daten wurden inzwischen geändert. Bitte erst neu laden und Änderungen zusammenführen.' });
