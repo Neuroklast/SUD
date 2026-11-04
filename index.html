@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SUD · Persönliche Zeitleiste</title>
+<style>
+:root{--bg:#0b0e14;--panel:#141923;--panel2:#181e29;--edge:#2b3342;--text:#eff2f8;--muted:#a4afbf;--soft:#747f91;--accent:#ff817c;--focus:#a5dbef;--radius:16px;--ok:#9fe0bd}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}a{color:#b2dcf0}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.shell{max-width:1710px;margin:auto;padding:28px 28px 56px}header{display:flex;justify-content:space-between;align-items:flex-start;gap:22px;margin-bottom:25px}.eyebrow{display:flex;gap:12px;align-items:center;color:var(--accent);font-size:11px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}.eyebrow .line{height:1px;background:var(--accent);width:23px}.title{font-size:clamp(27px,3vw,38px);line-height:1.1;letter-spacing:-.05em;margin:9px 0 10px;font-weight:770}.subtitle{color:var(--muted);margin:0;max-width:720px}.top-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:3px}.btn{background:#232b39;color:#eef2f7;border:1px solid #384255;border-radius:9px;padding:10px 13px;font-size:12px;font-weight:650;display:inline-flex;gap:8px;align-items:center;justify-content:center}.btn:hover{background:#2e384a}.btn.primary{background:#e87a76;color:#181519;border-color:#e87a76}.btn.primary:hover{background:#ff9892}.btn.ghost{background:transparent}.btn.small{padding:7px 10px}.btn.danger{color:#ff9e9e;border-color:#754447;background:#311c24}.btn .sym{font-size:15px;line-height:1}
+.summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}.stat{background:linear-gradient(115deg,#171e2a,#111720);border:1px solid var(--edge);border-radius:12px;padding:14px 18px;display:flex;align-items:baseline;gap:15px}.stat strong{font-size:26px;letter-spacing:-.05em}.stat span{font-size:12px;color:var(--muted)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 338px;gap:17px;align-items:start}.panel{background:var(--panel);border:1px solid var(--edge);border-radius:var(--radius);min-width:0}.panel-pad{padding:20px 21px}.panel-heading{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}.panel-heading h2{font-size:16px;margin:0;letter-spacing:-.02em}.panel-heading .kicker{font-size:11px;color:var(--muted);font-weight:550}.panel-heading h3{margin:0;font-size:14px}.muted{color:var(--muted)}
+.plot-tools{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:center;margin:0 0 11px}.plot-tools .left{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.plot-tools .right{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.mini-label{color:var(--muted);font-size:11px}.inline-select{background:#111720;color:var(--text);border:1px solid #394255;border-radius:8px;padding:8px 10px;min-width:130px;max-width:230px;font-size:12px}.search{background:#101720;color:var(--text);border:1px solid #394255;border-radius:8px;padding:8px 10px;width:190px;max-width:100%;font-size:12px}.plot-wrap{border:1px solid #31394a;background:radial-gradient(ellipse at 50% 40%,#1c2430 0%,#111720 70%);border-radius:12px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}.plot-wrap::-webkit-scrollbar{height:10px}.plot-wrap::-webkit-scrollbar-thumb{background:#394357;border-radius:10px}#chart{display:block;width:1340px;height:505px;touch-action:pan-x;user-select:none}.chart-foot{display:flex;justify-content:space-between;align-items:start;gap:14px;color:var(--soft);font-size:11px;flex-wrap:wrap;margin-top:12px}.chart-foot strong{color:#dce2ef}.chart-foot .status{color:var(--ok)}
+.sidebar{display:flex;flex-direction:column;gap:16px}.section-divider{height:1px;background:var(--edge);margin:17px 0}.field{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}.field label{color:#c3ccdb;font-size:12px;font-weight:640}.field input:not([type="checkbox"]),.field textarea,.field select{width:100%;border:1px solid #3c4657;border-radius:8px;background:#0e141d;color:#f2f5fa;padding:10px 11px;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:#99c7df;box-shadow:0 0 0 2px #79b9df22}.field textarea{resize:vertical;min-height:80px}.form-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px}.check-collection{display:flex;flex-wrap:wrap;gap:7px;margin:5px 0 15px}.checkpill{border:1px solid #485366;background:#1b2230;display:flex;gap:6px;align-items:center;border-radius:99px;padding:6px 9px;font-size:12px;cursor:pointer}.checkpill input{accent-color:#e9827f}.swatch{width:9px;height:9px;display:inline-block;border-radius:50%;flex:0 0 auto}.buttonrow{display:flex;gap:8px;justify-content:flex-start;flex-wrap:wrap}.eventform-empty{padding:28px 0;text-align:center;color:#8d99ab}.eventform-empty strong{display:block;color:#cfd6e3;font-size:14px;margin-bottom:6px}.eventform-empty p{font-size:12px;line-height:1.5}.subtle{font-size:11px;color:var(--soft);margin:8px 0 0}.control-link{border:0;background:transparent;color:#9bcfe5;padding:2px;font-size:12px;cursor:pointer;text-decoration:underline;text-decoration-color:#6a91a3}
+.clusters{display:flex;flex-direction:column;gap:6px}.cluster-row,.entry-row{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 11px;border:1px solid #30394a;border-radius:10px;background:#171e29;color:var(--text)}.cluster-row:hover,.entry-row:hover{background:#202938;border-color:#556075}.cluster-row.active{border-color:#d0a09e;background:#372b32}.cluster-row .grow,.entry-row .grow{min-width:0;flex:1}.cluster-row strong,.entry-row strong{font-weight:650;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}.cluster-row small,.entry-row small{display:block;color:var(--soft);font-size:11px;margin-top:2px}.cluster-row .edit,.entry-row .edit{border:0;background:transparent;color:var(--muted);font-size:13px;padding:6px;border-radius:5px}.cluster-row .edit:hover,.entry-row .edit:hover{background:#384255;color:#fff}.list-scroller{max-height:320px;overflow:auto;display:flex;flex-direction:column;gap:7px;padding-right:3px}.empty-list{font-size:12px;color:#8995a7;padding:12px 0}.event-score{font-weight:750;font-variant-numeric:tabular-nums;color:#fff;padding:6px 7px;border-radius:7px;background:#394254;min-width:38px;text-align:center}.dot{height:12px;width:12px;border-radius:50%}.list-split{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px}
+.privacy{border:1px solid #3a4353;border-radius:10px;padding:12px 13px;background:#171e27;font-size:11px;line-height:1.55;color:#acb7c5;margin-top:16px}.privacy strong{color:#dce3ee;display:block;margin-bottom:5px}.info-section{margin-top:18px}.info-section h3{font-size:13px;margin:0 0 7px}.info-section p{font-size:12px;color:#9facbd;margin:0 0 10px}.info-section .top-actions{justify-content:flex-start}
+.modal-shade{position:fixed;inset:0;background:#06080ccb;display:flex;align-items:center;justify-content:center;padding:20px;z-index:15}.modal-shade[hidden]{display:none}.modal{width:min(100%,440px);background:#151b25;border:1px solid #475167;border-radius:14px;padding:22px;box-shadow:0 30px 85px #0009}.modal h2{font-size:19px;margin:0 0 16px}.palette{display:flex;gap:9px;margin:4px 0 14px;flex-wrap:wrap}.color-opt{height:25px;width:25px;border-radius:50%;border:2px solid transparent;cursor:pointer}.color-opt.chosen{outline:2px solid #f0f3f9;outline-offset:2px}.footer{color:#677486;text-align:center;font-size:11px;padding-top:18px}
+@media(max-width:1020px){.layout{grid-template-columns:minmax(0,1fr)}.sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.sidebar>.panel:last-child{grid-column:span 2}}@media(max-width:700px){.shell{padding:16px 12px 40px}header{flex-direction:column}.top-actions{justify-content:flex-start}.summary{gap:7px}.stat{padding:10px;display:block}.stat strong{font-size:21px;display:block}.stat span{font-size:10px}.panel-pad{padding:14px}.sidebar{display:flex}.plot-tools{display:block}.plot-tools .right{margin-top:10px}.chart-foot{display:block}.chart-foot span{display:block;margin-bottom:5px}}
+@media print{.sidebar,.top-actions,.plot-tools,.chart-foot,.privacy,.footer{display:none!important}.shell{max-width:none;padding:0}.layout{display:block}.panel{border:0;background:white}.plot-wrap{overflow:visible;border:0}#chart{transform-origin:left top;transform:scale(.73)}body{background:white}}
+
+.cloud-section{display:none;background:linear-gradient(130deg,#181e2b,#101722);border:1px solid #45566a;border-radius:13px;padding:16px 18px;margin-bottom:17px}
+.cloud-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}
+.cloud-head h2{font-size:15px;margin:0;color:#dcecf7}
+.cloud-desc{color:#abb9ca;font-size:12px;margin:0 0 13px}
+.cloud-grid{display:grid;grid-template-columns:minmax(200px,1fr) minmax(200px,1fr);gap:11px}
+.cloud-grid label{display:block;font-weight:600;font-size:11px;color:#c8d5e3}
+.cloud-grid input{display:block;width:100%;margin-top:5px;background:#0c121b;border:1px solid #46536a;border-radius:7px;padding:9px 10px;color:white}
+.cloud-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:12px}
+.cloud-status{font-size:12px;color:#b1bdc9}
+.cloud-hint{font-size:11px;color:#9eaabe;margin-top:10px}
+@media(max-width:700px){.cloud-grid{grid-template-columns:1fr}}
+
+</style>
+</head>
+<body>
+<script type="application/json" id="embedded-data">null</script>
+<div class="shell">
+<header>
+ <div><div class="eyebrow"><span class="line"></span> PERSÖNLICHE ZEITLEISTE · LOKAL / CLOUD</div><h1 class="title">SUD <span style="font-weight:370;color:#aeb8c5">/ Belastungsverlauf</span></h1><p class="subtitle">Lebensjahre 0–37. Erlebnisse als Punkte setzen, mit Text versehen und über farbige Cluster miteinander verbinden. Daten lokal bearbeiten und bei Bedarf Ende-zu-Ende-verschlüsselt auf Vercel sichern.</p></div>
+ <div class="top-actions" aria-label="Dateiaktionen">
+  <button class="btn" id="import-btn" title="Vorhandene JSON- oder Excel-Datei laden"><span class="sym">↥</span> Importieren</button>
+  <button class="btn" id="json-btn" title="Sicherung als JSON-Datei"><span class="sym">⤓</span> JSON</button>
+  <button class="btn" id="excel-btn" title="Echte Excel-Arbeitsmappe erstellen"><span class="sym">▦</span> Excel</button>
+  <button class="btn primary" id="html-btn" title="Komplette Anwendung einschließlich aktueller Daten in einer einzigen HTML-Datei sichern"><span class="sym">⤓</span> HTML mit Daten sichern</button>
+ </div>
+</header>
+<section id="cloud-section" class="cloud-section" aria-label="Vercel Cloud-Sicherung" hidden>
+ <div class="cloud-head"><h2>Private Cloud-Sicherung</h2><span class="mini-label">Vercel Blob · verschlüsselt</span></div>
+ <p class="cloud-desc">Zwei getrennte Passwörter: Der Zugangsschlüssel berechtigt zum Speichern. Das Verschlüsselungspasswort bleibt im Browser und schützt den Inhalt. Die Nutzung ohne Cloud bleibt möglich.</p>
+ <div class="cloud-grid">
+  <label for="cloud-access">Cloud-Zugangsschlüssel<input id="cloud-access" type="password" autocomplete="off" spellcheck="false" placeholder="Zugangsschlüssel aus Vercel"></label>
+  <label for="cloud-pass">Verschlüsselungspasswort<input id="cloud-pass" type="password" autocomplete="new-password" placeholder="Eigenes, sicheres Passwort (min. 12 Zeichen)"></label>
+ </div>
+ <div class="cloud-actions"><button class="btn" id="cloud-load" type="button">Aus Cloud laden</button><button class="btn primary" id="cloud-save" type="button">In Cloud speichern</button><label class="mini-label" style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="cloud-auto">Automatisch synchronisieren</label></div>
+ <div class="cloud-actions"><span id="cloud-status" class="cloud-status" role="status" aria-live="polite">Cloud nicht verbunden. Lokale Bearbeitung jederzeit möglich.</span></div>
+ <p class="cloud-hint">Wichtig: Ohne Verschlüsselungspasswort können Cloud-Daten nicht wiederhergestellt werden. Ein JSON-/HTML-Backup zusätzlich aufbewahren. Cloud-Daten werden bei der Übertragung und auf Vercel verschlüsselt gespeichert.</p>
+</section>
+<section class="summary" aria-label="Übersicht">
+ <div class="stat"><strong id="event-count">0</strong><span>Erlebnisse eingetragen</span></div>
+ <div class="stat"><strong id="cluster-count">0</strong><span>Cluster angelegt</span></div>
+ <div class="stat"><strong>0–37</strong><span>Lebensjahre im Überblick</span></div>
+</section>
+<div class="layout">
+ <main>
+ <section class="panel panel-pad" aria-label="Interaktive SUD-Zeitleiste">
+  <div class="panel-heading"><h2>Deine Zeitleiste</h2><span class="kicker">SUD 0–10 · ALTER 0–37</span></div>
+  <div class="plot-tools"><div class="left"><span class="mini-label">Ansicht</span><select id="filter-cluster" class="inline-select" aria-label="Cluster auswählen"><option value="all">Alle Erlebnisse</option></select><button class="btn small ghost" id="reset-view">Filter zurücksetzen</button></div><div class="right"><input class="search" id="search" type="search" placeholder="Nach Eintrag suchen …" aria-label="Erlebnisse durchsuchen"><button class="btn small" id="new-event">+ Eintrag</button></div></div>
+  <div class="plot-wrap" id="plot-wrap"><svg id="chart" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1340 505" role="img" aria-label="Interaktives SUD-Diagramm. Per Klick auf einen Rasterpunkt Eintrag erstellen."></svg></div>
+  <div class="chart-foot"><span><strong>Bedienung:</strong> Im Diagramm auf Jahr und SUD-Wert klicken. Bestehende Punkte anklicken, um sie zu bearbeiten. Bei vielen Punkten horizontal scrollen.</span><span id="save-status" class="status" role="status">Lokal bereit</span></div>
+ </section>
+ <section class="panel panel-pad info-section"><h3>So funktioniert es</h3><p>Jeder Punkt steht für ein Ereignis und den dazu eingetragenen SUD-Wert. Mehrere Punkte können im selben Jahr und auf derselben Skalenstufe liegen. Cluster zeichnen Verbindungen zwischen zusammengehörenden Punkten. Der Wert ist eine persönliche Einschätzung, keine Diagnose.</p><div class="buttonrow"><button class="btn small ghost" id="copy-btn">Daten als JSON kopieren</button><button class="btn small ghost" id="csv-btn">CSV exportieren</button><button class="btn small ghost" id="clear-btn">Alle Daten löschen</button></div><div class="privacy"><strong>Privatsphäre und Sicherung</strong>Die automatische Speicherung im Browser ist nur für dieses Browserprofil gedacht. Sie reist beim Kopieren der HTML-Datei nicht mit. Dafür bitte <b>„HTML mit Daten sichern“</b> oder <b>„JSON“</b> verwenden. Exportdateien enthalten persönliche Inhalte im Klartext. Gib sie nur bewusst weiter und lege sie geschützt ab. Es gibt keine Cloud-Verbindung.</div></section>
+ </main>
+ <aside class="sidebar">
+  <section class="panel panel-pad" aria-label="Eintrag bearbeiten"><div class="panel-heading"><h2 id="editor-title">Eintrag</h2><span class="kicker" id="editor-mode">NEU / BEARBEITEN</span></div>
+   <div id="editor-empty" class="eventform-empty"><strong>Noch kein Eintrag ausgewählt</strong><p>Klicke auf eine Stelle im Diagramm oder auf „+ Eintrag“. Der Alters- und SUD-Wert wird automatisch übernommen.</p><button class="btn small" id="empty-new">+ Eintrag erstellen</button></div>
+   <form id="event-form" hidden>
+    <div class="field"><label for="event-title">Bezeichnung *</label><input id="event-title" maxlength="140" required placeholder="Kurzer Titel"></div>
+    <div class="form-cols"><div class="field"><label for="event-age">Alter in Jahren *</label><input id="event-age" type="number" inputmode="numeric" step="1" min="0" max="37" required></div><div class="field"><label for="event-sud">SUD-Wert *</label><select id="event-sud" required><option value="10">10 · sehr hoch</option><option value="9">9</option><option value="8">8</option><option value="7">7</option><option value="6">6</option><option value="5">5</option><option value="4">4</option><option value="3">3</option><option value="2">2</option><option value="1">1 · niedrig</option><option value="0">0 · keine Belastung</option></select></div></div>
+    <div class="field"><label for="event-notes">Notizen (optional)</label><textarea id="event-notes" maxlength="5000" placeholder="Nur so viel festhalten, wie du möchtest"></textarea></div>
+    <div class="list-split"><span class="mini-label">ZU CLUSTERN ZUORDNEN</span><button type="button" class="control-link" id="inline-new-cluster">Neues Cluster</button></div><div id="event-cluster-checks" class="check-collection"></div>
+    <div class="buttonrow"><button class="btn primary" type="submit">Eintrag speichern</button><button class="btn ghost" type="button" id="cancel-event">Schließen</button><button class="btn danger" type="button" id="delete-event" hidden>Löschen</button></div>
+   </form>
+  </section>
+  <section class="panel panel-pad" aria-label="Cluster verwalten"><div class="panel-heading"><h2>Cluster</h2><button class="btn small" id="new-cluster">+ Cluster</button></div><div id="cluster-list" class="clusters"></div><p class="subtle">Beispiel: Ein Cluster wie „Mobbing“ kann mehrere Ereignisse aus unterschiedlichen Jahren enthalten. Eine Zuordnung zu mehreren Clustern ist möglich.</p></section>
+  <section class="panel panel-pad" aria-label="Ereignisliste"><div class="panel-heading"><h2>Einträge</h2><span id="visible-count" class="kicker">0 SICHTBAR</span></div><div id="event-list" class="list-scroller"></div></section>
+ </aside>
+</div>
+<footer class="footer">Persönliches Dokument · komplett offline · keine Anmeldung · keine externen Abhängigkeiten</footer>
+</div>
+<div class="modal-shade" id="cluster-modal" hidden><div class="modal" role="dialog" aria-modal="true" aria-labelledby="cluster-dialog-title"><h2 id="cluster-dialog-title">Cluster erstellen</h2><form id="cluster-form"><div class="field"><label for="cluster-name">Name *</label><input id="cluster-name" maxlength="100" required placeholder="z. B. Mobbing"></div><div class="field"><label for="cluster-notes">Beschreibung (optional)</label><textarea id="cluster-notes" maxlength="2000" placeholder="Was verbindet diese Ereignisse?"></textarea></div><div class="field"><label>Farbe</label><div id="color-choices" class="palette"></div></div><div class="buttonrow"><button type="submit" class="btn primary">Cluster speichern</button><button id="cluster-cancel" type="button" class="btn ghost">Abbrechen</button><button id="cluster-delete" type="button" class="btn danger" hidden>Cluster löschen</button></div></form></div></div>
+<input id="file-picker" hidden type="file" accept=".json,.csv,.xlsx,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+<script>
+'use strict';
+/* Portable SUD timeline. No dependencies and no remote requests. */
+const STORAGE_KEY='portable-sud-timeline-v1';
+const COLORS=['#ef8682','#92b9e8','#a994ef','#79bfae','#f0b67c','#d8a5c4','#b5c77f','#dfa68f'];
+const emptyData=()=>({version:1,events:[],clusters:[]});
+const $=id=>document.getElementById(id);
+const escapeHTML=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>('id'+(crypto?.randomUUID?.() || (Date.now().toString(36)+Math.random().toString(36).slice(2))));
+const datePart=()=>new Date().toISOString().slice(0,10);
+let data=emptyData();let selectedId=null, editorDraft=null,editingClusterId=null,currentColor=COLORS[0],storageAvailable=true,clusterCreatedFromEditor=false;
+const dim={left:76,right:1278,top:62,bottom:434,width:1340,height:505};
+const xAge=age=>dim.left+(age/37)*(dim.right-dim.left);
+const ySud=sud=>dim.bottom-(sud/10)*(dim.bottom-dim.top);
+const clamp=(a,b,c)=>Math.max(b,Math.min(c,a));
+function normalize(input){
+ if(!input||typeof input!=='object'||!Array.isArray(input.events)||!Array.isArray(input.clusters))throw Error('Ungültiges Datenformat. Erwartet werden „events“ und „clusters“.');
+ const seenClusters=new Set(),clusters=[];
+ for(const c of input.clusters.slice(0,1500)){
+  const id=String(c.id||uid()).slice(0,100);
+  if(seenClusters.has(id))continue;seenClusters.add(id);
+  clusters.push({id,name:String(c.name||c.title||'Cluster').slice(0,100),notes:String(c.notes||'').slice(0,2000),color:COLORS.includes(c.color)?c.color:COLORS[clusters.length%COLORS.length]});
+ }
+ const seenEvents=new Set(),events=[];
+ for(const ev of input.events.slice(0,20000)){
+  const age=Number(ev.age),sud=Number(ev.sud),id=String(ev.id||uid()).slice(0,100);
+  if(!Number.isInteger(age)||age<0||age>37||!Number.isInteger(sud)||sud<0||sud>10||seenEvents.has(id))continue;
+  seenEvents.add(id);
+  const ids=Array.isArray(ev.clusterIds)?ev.clusterIds:typeof ev.clusterIds==='string'?ev.clusterIds.split(/[,;]/).map(s=>s.trim()):[];
+  events.push({id,age,sud,title:String(ev.title||'Ohne Titel').slice(0,140),notes:String(ev.notes||'').slice(0,5000),clusterIds:[...new Set(ids.map(String).filter(cid=>seenClusters.has(cid)))]});
+ }
+ return {version:1,events,clusters};
+}
+function load(){
+ try{
+  const embedded=JSON.parse($('embedded-data').textContent);
+  if(embedded){data=normalize(embedded);setStatus('Daten aus HTML geladen');return;}
+ }catch(e){console.warn('Eingebettete Daten konnten nicht geladen werden.',e)}
+ try{const stored=localStorage.getItem(STORAGE_KEY);if(stored)data=normalize(JSON.parse(stored));setStatus('Browser-Speicherung aktiv');}
+ catch(e){storageAvailable=false;setStatus('Browser-Speicherung nicht verfügbar · bitte exportieren',false)}
+}
+function setStatus(t,success=true){$('save-status').textContent=t;$('save-status').style.color=success?'#9fe0bd':'#f0b67c'}
+function persist(){
+ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(data));storageAvailable=true;setStatus('Automatisch im Browser gespeichert');}
+ catch(e){storageAvailable=false;setStatus('Bitte HTML oder JSON sichern · Browser-Speicherung nicht verfügbar',false)}
+}
+function filterEvents(){
+ const query=$('search').value.trim().toLocaleLowerCase('de'),group=$('filter-cluster').value;
+ return data.events.filter(ev=>(group==='all'||ev.clusterIds.includes(group))&&(!query||[ev.title,ev.notes,...ev.clusterIds.map(id=>data.clusters.find(c=>c.id===id)?.name||'')].join(' ').toLocaleLowerCase('de').includes(query)));
+}
+function render(){
+ $('event-count').textContent=data.events.length;$('cluster-count').textContent=data.clusters.length;
+ const old=$('filter-cluster').value;
+ $('filter-cluster').innerHTML='<option value="all">Alle Erlebnisse</option>'+data.clusters.map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('');
+ $('filter-cluster').value=data.clusters.some(c=>c.id===old)?old:'all';
+ const visible=filterEvents();$('visible-count').textContent=visible.length+' SICHTBAR';
+ renderChart(visible);renderClusters();renderEventList(visible);renderEditor();
+}
+function renderChart(visible){
+ const parts=[];
+ parts.push(`<defs><filter id="halo"><feGaussianBlur stdDeviation="3"/></filter></defs>`);
+ parts.push(`<rect x="${dim.left}" y="${dim.top}" width="${dim.right-dim.left}" height="${dim.bottom-dim.top}" fill="#19212d" rx="3"/>`);
+ for(let sud=0;sud<=10;sud++){
+  const y=ySud(sud),major=sud===0||sud===5||sud===10;
+  parts.push(`<line x1="${dim.left}" y1="${y}" x2="${dim.right}" y2="${y}" stroke="${major?'#455065':'#303949'}" stroke-width="${major?1.2:.7}"/>`);
+  parts.push(`<text x="${dim.left-23}" y="${y+4}" fill="${major?'#eef0f6':'#95a0b0'}" text-anchor="middle" font-size="12" font-weight="${major?700:400}">${sud}</text>`);
+ }
+ for(let age=0;age<=37;age++){
+  const x=xAge(age),major=age%5===0||age===37;
+  parts.push(`<line x1="${x}" y1="${dim.top}" x2="${x}" y2="${dim.bottom}" stroke="${major?'#435066':'#303849'}" stroke-width="${major?1.15:.65}"/>`);
+  if(age%2===0||age===37)parts.push(`<text x="${x}" y="${dim.bottom+23}" fill="${major?'#d8e0ea':'#91a0b1'}" font-size="10.5" text-anchor="middle">${age}</text>`);
+ }
+ parts.push(`<text x="${(dim.left+dim.right)/2}" y="${dim.height-11}" fill="#aab7c9" font-size="12" font-weight="600" text-anchor="middle">Lebensalter in Jahren</text>`);
+ parts.push(`<text x="19" y="${(dim.top+dim.bottom)/2}" transform="rotate(-90 19 ${(dim.top+dim.bottom)/2})" fill="#aab7c9" font-size="12" font-weight="600" text-anchor="middle">SUD · subjektive Belastung</text>`);
+ for(const c of data.clusters){
+  const members=visible.filter(e=>e.clusterIds.includes(c.id)).sort((a,b)=>a.age-b.age||a.sud-b.sud);
+  if(!members.length)continue;
+  const x1=xAge(members[0].age),x2=xAge(members[members.length-1].age);
+  const cColor=c.color;
+  if(members.length>1){
+   const path=members.map((e,i)=>`${i?'L':'M'}${xAge(e.age).toFixed(1)},${ySud(e.sud).toFixed(1)}`).join(' ');
+   parts.push(`<path d="${path}" fill="none" stroke="${cColor}" stroke-opacity=".63" stroke-width="2.5" stroke-linejoin="round" stroke-dasharray="7 5" pointer-events="none"/>`);
+  }
+  let title=c.name.length>21?c.name.slice(0,20)+'…':c.name;
+  if(x2-x1>44){parts.push(`<line x1="${x1}" y1="37" x2="${x2}" y2="37" stroke="${cColor}" stroke-width="4" stroke-linecap="round" opacity=".72"/>`);}
+  const tx=clamp((x1+x2)/2,dim.left+50,dim.right-50);
+  parts.push(`<text x="${tx}" y="28" text-anchor="middle" fill="${cColor}" font-size="11" font-weight="650" pointer-events="none">${escapeHTML(title)}</text>`);
+ }
+ // Multiple events can occupy exactly the same coordinate: offset each dot slightly.
+ const coordCounts=new Map(),usedLabels=[];
+ const ordered=[...visible].sort((a,b)=>a.age-b.age||b.sud-a.sud);
+ for(const ev of ordered){
+  const key=ev.age+':'+ev.sud;const index=coordCounts.get(key)||0;coordCounts.set(key,index+1);
+  const shift=index===0?[0,0]:[Math.cos(index*2.4)*Math.min(24,9+index*2),Math.sin(index*2.4)*Math.min(22,9+index*2)];
+  const x=xAge(ev.age)+shift[0],y=ySud(ev.sud)+shift[1];
+  const c=data.clusters.find(cl=>ev.clusterIds.includes(cl.id));const color=c?.color||'#f38b84';
+  const chosen=ev.id===selectedId;
+  parts.push(`<g class="chart-point" data-event="${escapeHTML(ev.id)}" tabindex="0" role="button" aria-label="${escapeHTML(ev.title)}: Alter ${ev.age}, SUD ${ev.sud}" style="cursor:pointer"><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${chosen?15:11}" fill="${color}" opacity=".15"/><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="${chosen?7:6}" fill="${color}" stroke="${chosen?'#fff':'#1a2230'}" stroke-width="${chosen?2.8:1.7}"/><circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="15" fill="transparent"/><title>${escapeHTML(ev.title)} · ${ev.age} Jahre · SUD ${ev.sud}</title></g>`);
+  let label=ev.title.trim();if(label.length>23)label=label.slice(0,22)+'…';
+  let width=Math.min(168,label.length*6.6+14),height=18;
+  const possible=[];
+  for(const dx of [12,-width-13,19,-width-20])for(const dy of [-21,8,-41,27,-61,45])possible.push({x:x+dx,y:y+dy});
+  let best=null,bestCost=Infinity;
+  for(const p of possible){
+   const px=clamp(p.x,dim.left+2,dim.right-width-1),py=clamp(p.y,dim.top+1,dim.bottom-height-1);
+   let cost=0;for(const prev of usedLabels){const overlapX=Math.max(0,Math.min(px+width,prev.x+prev.w)-Math.max(px,prev.x)),overlapY=Math.max(0,Math.min(py+height,prev.y+prev.h)-Math.max(py,prev.y));cost+=overlapX*overlapY*3}
+   cost+=Math.abs(px-p.x)+Math.abs(py-p.y)+Math.abs(px-x)*.06;
+   if(cost<bestCost){bestCost=cost;best={x:px,y:py}};
+   if(cost<1)break;
+  }
+  usedLabels.push({...best,w:width,h:height});
+  parts.push(`<text x="${(best.x+5).toFixed(1)}" y="${(best.y+13).toFixed(1)}" fill="${chosen?'#fff':'#d3dce7'}" font-size="10.7" font-weight="${chosen?700:500}" pointer-events="none" paint-order="stroke" stroke="#19212d" stroke-width="3.5" stroke-linejoin="round">${escapeHTML(label)}</text>`);
+ }
+ if(!data.events.length){
+  parts.push(`<rect x="${dim.left+310}" y="183" width="570" height="113" rx="12" fill="#111823" opacity=".92" stroke="#485366" stroke-dasharray="4 4" pointer-events="none"/>`);
+  parts.push(`<text x="${(dim.left+dim.right)/2}" y="224" fill="#ecf1f8" font-size="17" font-weight="650" text-anchor="middle" pointer-events="none">Hier beginnt deine Zeitleiste</text>`);
+  parts.push(`<text x="${(dim.left+dim.right)/2}" y="251" fill="#9eacc1" font-size="12" text-anchor="middle" pointer-events="none">Klicke in das Raster, um deinen ersten Punkt zu setzen.</text>`);
+ }
+ $('chart').innerHTML=parts.join('');
+}
+function renderClusters(){
+ const html=data.clusters.map(c=>{
+  const members=data.events.filter(e=>e.clusterIds.includes(c.id)),min=members.length?Math.min(...members.map(m=>m.age)):null,max=members.length?Math.max(...members.map(m=>m.age)):null;
+  return `<div class="cluster-row ${$('filter-cluster').value===c.id?'active':''}"><span class="dot" style="background:${c.color}"></span><button type="button" class="grow control-link cluster-filter" data-id="${escapeHTML(c.id)}" style="text-align:left;text-decoration:none"><strong style="color:#ecf0f6">${escapeHTML(c.name)}</strong><small>${members.length} Punkte${min===null?'':' · Alter '+min+'–'+max}</small></button><button class="edit cluster-edit" data-id="${escapeHTML(c.id)}" aria-label="Cluster ${escapeHTML(c.name)} bearbeiten" title="Cluster bearbeiten">✎</button></div>`;
+ });
+ $('cluster-list').innerHTML=html.join('')||'<div class="empty-list">Noch keine Cluster angelegt.</div>';
+}
+function renderEventList(list){
+ const items=[...list].sort((a,b)=>a.age-b.age||b.sud-a.sud||a.title.localeCompare(b.title,'de'));
+ $('event-list').innerHTML=items.map(ev=>{
+  const c=data.clusters.find(c=>ev.clusterIds.includes(c.id));
+  return `<div class="entry-row"><span class="dot" style="background:${c?.color||'#ef8682'}"></span><button class="control-link grow entry-open" data-id="${escapeHTML(ev.id)}" style="text-align:left;text-decoration:none"><strong style="color:#ebf0f8">${escapeHTML(ev.title)}</strong><small>Alter ${ev.age}${ev.clusterIds.length?' · '+ev.clusterIds.length+' Cluster':''}</small></button><span class="event-score">${ev.sud}</span><button class="edit entry-open" data-id="${escapeHTML(ev.id)}" title="Bearbeiten" aria-label="Eintrag bearbeiten">✎</button></div>`;
+ }).join('')||'<div class="empty-list">Noch keine sichtbaren Einträge.</div>';
+}
+function renderEditor(){
+ const active=selectedId?data.events.find(e=>e.id===selectedId):null;const edit=active||editorDraft;
+ $('event-form').hidden=!edit;$('editor-empty').hidden=!!edit;
+ if(!edit){$('editor-title').textContent='Eintrag';$('editor-mode').textContent='NEU / BEARBEITEN';return;}
+ $('editor-title').textContent=active?'Eintrag bearbeiten':'Neuer Eintrag';$('editor-mode').textContent=active?'BESTEHENDER PUNKT':'NEUER PUNKT';
+ $('event-title').value=edit.title||'';$('event-age').value=edit.age;$('event-sud').value=String(edit.sud);$('event-notes').value=edit.notes||'';
+ $('delete-event').hidden=!active;
+ $('event-cluster-checks').innerHTML=data.clusters.map(c=>`<label class="checkpill"><input type="checkbox" name="event-cluster" value="${escapeHTML(c.id)}" ${edit.clusterIds?.includes(c.id)?'checked':''}><i class="swatch" style="background:${c.color}"></i>${escapeHTML(c.name)}</label>`).join('')||'<span class="subtle">Du kannst zuerst ein Cluster erstellen oder den Eintrag ohne Cluster speichern.</span>';
+}
+function openNew(age=0,sud=5){selectedId=null;editorDraft={age,sud,title:'',notes:'',clusterIds:[]};render();$('event-title').focus({preventScroll:true})}
+function openEvent(id){const ev=data.events.find(e=>e.id===id);if(!ev)return;selectedId=id;editorDraft=null;render();$('event-title').focus({preventScroll:true})}
+function closeEvent(){selectedId=null;editorDraft=null;render()}
+$('event-form').addEventListener('submit',e=>{
+ e.preventDefault();const title=$('event-title').value.trim(),age=Number($('event-age').value),sud=Number($('event-sud').value);
+ if(!title){$('event-title').focus();return}
+ if(!Number.isInteger(age)||age<0||age>37||!Number.isInteger(sud)||sud<0||sud>10){alert('Bitte ein ganzzahliges Alter von 0 bis 37 und einen SUD-Wert von 0 bis 10 eingeben.');return}
+ const ids=[...document.querySelectorAll('[name="event-cluster"]:checked')].map(el=>el.value);
+ const entry={id:selectedId||uid(),title,age,sud,notes:$('event-notes').value.trim(),clusterIds:ids};
+ const idx=data.events.findIndex(x=>x.id===entry.id);if(idx<0)data.events.push(entry);else data.events[idx]=entry;
+ selectedId=entry.id;editorDraft=null;persist();render();
+});
+$('delete-event').addEventListener('click',()=>{if(!selectedId)return;const entry=data.events.find(e=>e.id===selectedId);if(confirm(`Eintrag „${entry?.title||''}“ wirklich löschen?`)){data.events=data.events.filter(e=>e.id!==selectedId);closeEvent();persist()}});
+$('cancel-event').addEventListener('click',closeEvent);$('new-event').addEventListener('click',()=>openNew(0,5));$('empty-new').addEventListener('click',()=>openNew(0,5));
+$('chart').addEventListener('click',evt=>{
+ const point=evt.target.closest?.('[data-event]');if(point){openEvent(point.getAttribute('data-event'));return;}
+ const svg=$('chart'),ctm=svg.getScreenCTM();if(!ctm)return;const pt=new DOMPoint(evt.clientX,evt.clientY).matrixTransform(ctm.inverse());
+ if(pt.x<dim.left-12||pt.x>dim.right+12||pt.y<dim.top-12||pt.y>dim.bottom+12)return;
+ const age=clamp(Math.round((pt.x-dim.left)/(dim.right-dim.left)*37),0,37);
+ const sud=clamp(Math.round((dim.bottom-pt.y)/(dim.bottom-dim.top)*10),0,10);
+ openNew(age,sud);
+});
+$('chart').addEventListener('keydown',e=>{const p=e.target.closest?.('[data-event]');if(p&&(e.key==='Enter'||e.key===' ')){e.preventDefault();openEvent(p.getAttribute('data-event'))}});
+$('event-list').addEventListener('click',e=>{const b=e.target.closest('.entry-open');if(b)openEvent(b.dataset.id)});
+$('cluster-list').addEventListener('click',e=>{const edit=e.target.closest('.cluster-edit');if(edit){openClusterDialog(edit.dataset.id);return}const filter=e.target.closest('.cluster-filter');if(filter){$('filter-cluster').value=filter.dataset.id;render()}});
+$('filter-cluster').addEventListener('change',render);$('search').addEventListener('input',()=>{const list=filterEvents();$('visible-count').textContent=list.length+' SICHTBAR';renderChart(list);renderEventList(list)});
+$('reset-view').addEventListener('click',()=>{$('filter-cluster').value='all';$('search').value='';render()});
+function openClusterDialog(id=null){editingClusterId=id;const c=data.clusters.find(c=>c.id===id);currentColor=c?.color||COLORS[data.clusters.length%COLORS.length];$('cluster-dialog-title').textContent=c?'Cluster bearbeiten':'Cluster erstellen';$('cluster-name').value=c?.name||'';$('cluster-notes').value=c?.notes||'';$('cluster-delete').hidden=!c;
+ $('color-choices').innerHTML=COLORS.map(color=>`<button type="button" class="color-opt ${color===currentColor?'chosen':''}" data-color="${color}" style="background:${color}" aria-label="Farbe ${color} wählen"></button>`).join('');
+ $('cluster-modal').hidden=false;$('cluster-name').focus();}
+function closeClusterDialog(){$('cluster-modal').hidden=true;editingClusterId=null}
+$('new-cluster').addEventListener('click',()=>{clusterCreatedFromEditor=false;openClusterDialog()});$('inline-new-cluster').addEventListener('click',()=>{clusterCreatedFromEditor=true;openClusterDialog()});$('cluster-cancel').addEventListener('click',closeClusterDialog);
+$('color-choices').addEventListener('click',e=>{const b=e.target.closest('[data-color]');if(!b)return;currentColor=b.dataset.color;for(const x of $('color-choices').children)x.classList.toggle('chosen',x.dataset.color===currentColor)});
+$('cluster-modal').addEventListener('click',e=>{if(e.target===$('cluster-modal'))closeClusterDialog()});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('cluster-modal').hidden)closeClusterDialog()});
+$('cluster-form').addEventListener('submit',e=>{
+ e.preventDefault();const name=$('cluster-name').value.trim();if(!name)return;
+ const c={id:editingClusterId||uid(),name,color:currentColor,notes:$('cluster-notes').value.trim()};
+ const index=data.clusters.findIndex(v=>v.id===c.id);if(index<0)data.clusters.push(c);else data.clusters[index]=c;
+ // Preserve unsaved editor data when opening a cluster dialog from the editor.
+ const tmp=readEditorFields(),shouldAdd=clusterCreatedFromEditor&&!editingClusterId;
+ closeClusterDialog();persist();render();
+ if(tmp){
+  $('event-title').value=tmp.title;$('event-age').value=tmp.age;$('event-sud').value=String(tmp.sud);$('event-notes').value=tmp.notes;
+  const checks=$('event-cluster-checks').querySelectorAll('input');for(const chk of checks)chk.checked=tmp.clusterIds.includes(chk.value)||(shouldAdd&&chk.value===c.id);
+ }
+});
+function readEditorFields(){if($('event-form').hidden)return null;return {id:selectedId||null,title:$('event-title').value,age:Number($('event-age').value),sud:Number($('event-sud').value),notes:$('event-notes').value,clusterIds:[...document.querySelectorAll('[name="event-cluster"]:checked')].map(x=>x.value)}}
+$('cluster-delete').addEventListener('click',()=>{const c=data.clusters.find(c=>c.id===editingClusterId);if(!c)return;const count=data.events.filter(e=>e.clusterIds.includes(c.id)).length;if(!confirm(`Cluster „${c.name}“ löschen? ${count} zugeordnete Ereignisse bleiben erhalten.`))return;data.clusters=data.clusters.filter(x=>x.id!==c.id);for(const e of data.events)e.clusterIds=e.clusterIds.filter(id=>id!==c.id);closeClusterDialog();persist();render()});
+function downloadBlob(blob,file){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=file;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
+function downloadText(text,file,type){downloadBlob(new Blob([text],{type}),file)}
+$('json-btn').addEventListener('click',()=>downloadText(JSON.stringify(data,null,2),'SUD_Zeitleiste_'+datePart()+'.json','application/json;charset=utf-8'));
+$('html-btn').addEventListener('click',()=>{
+ const clone=document.documentElement.cloneNode(true);clone.querySelector('#embedded-data').textContent=JSON.stringify(data).replace(/</g,'\\u003c');
+ const html='<!DOCTYPE html>\n'+clone.outerHTML;
+ downloadText(html,'SUD_Zeitleiste_mit_Daten_'+datePart()+'.html','text/html;charset=utf-8');setStatus('Eigenständige HTML-Datei mit Daten erstellt');
+});
+$('copy-btn').addEventListener('click',async()=>{
+ const s=JSON.stringify(data,null,2);
+ try{if(!navigator.clipboard)throw Error('Kein Clipboard API');await navigator.clipboard.writeText(s);setStatus('JSON-Daten in Zwischenablage kopiert');}
+ catch(e){const t=document.createElement('textarea');t.value=s;t.style.position='fixed';t.style.left='-10000px';document.body.appendChild(t);t.select();const ok=document.execCommand('copy');t.remove();if(ok)setStatus('JSON-Daten in Zwischenablage kopiert');else alert('Kopieren nicht möglich. Bitte den JSON-Export nutzen.')}
+});
+$('csv-btn').addEventListener('click',()=>{
+ const csvCell=v=>'"'+String(v??'').replaceAll('"','""')+'"';
+ const rows=[['ID','Alter','SUD','Titel','Notiz','Cluster-IDs','Cluster-Namen'],...data.events.map(e=>[e.id,e.age,e.sud,e.title,e.notes,e.clusterIds.join(','),e.clusterIds.map(id=>data.clusters.find(c=>c.id===id)?.name||'').join(', ')])];
+ downloadText('\ufeff'+rows.map(row=>row.map(csvCell).join(';')).join('\r\n'),'SUD_Zeitleiste_'+datePart()+'.csv','text/csv;charset=utf-8');
+});
+$('clear-btn').addEventListener('click',()=>{if(!confirm('Wirklich alle Einträge und Cluster aus dieser geöffneten Anwendung löschen? Erstelle vorher bei Bedarf eine Sicherung.'))return;data=emptyData();selectedId=null;editorDraft=null;persist();render()});
+/* Standalone XLSX export. ZIP stored method 0, no JS packages or remote CDNs. */
+const encoder=new TextEncoder();
+function le16(out,pos,num){out[pos]=num&255;out[pos+1]=(num>>>8)&255}
+function le32(out,pos,num){le16(out,pos,num&65535);le16(out,pos+2,(num>>>16)&65535)}
+const crcTable=Array.from({length:256},(_,i)=>{let c=i;for(let k=0;k<8;k++)c=(c&1)?(0xedb88320^(c>>>1)):(c>>>1);return c>>>0});
+function crc32(bytes){let c=0xffffffff;for(const b of bytes)c=crcTable[(c^b)&255]^(c>>>8);return (c^0xffffffff)>>>0}
+function zipStored(files){const chunks=[],central=[];let offset=0;
+ for(const [name,text] of files){const file=encoder.encode(text),n=encoder.encode(name),crc=crc32(file);const l=new Uint8Array(30+n.length);le32(l,0,0x04034b50);le16(l,4,20);le16(l,6,0x0800);le16(l,8,0);le32(l,14,crc);le32(l,18,file.length);le32(l,22,file.length);le16(l,26,n.length);l.set(n,30);chunks.push(l,file);
+ const c=new Uint8Array(46+n.length);le32(c,0,0x02014b50);le16(c,4,20);le16(c,6,20);le16(c,8,0x0800);le16(c,10,0);le32(c,16,crc);le32(c,20,file.length);le32(c,24,file.length);le16(c,28,n.length);le32(c,42,offset);c.set(n,46);central.push(c);offset+=l.length+file.length}
+ const centralOffset=offset;for(const c of central){chunks.push(c);offset+=c.length}
+ const end=new Uint8Array(22);le32(end,0,0x06054b50);le16(end,8,files.length);le16(end,10,files.length);le32(end,12,offset-centralOffset);le32(end,16,centralOffset);chunks.push(end);
+ return new Blob(chunks,{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+const xml=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+function colName(n){let s='';for(n++;n;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s}
+function sheetXML(rows,widths){return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>${widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${rows.map((row,ri)=>`<row r="${ri+1}">${row.map((value,ci)=>{const ref=colName(ci)+(ri+1),style=ri===0?' s="1"':'';if(typeof value==='number'&&Number.isFinite(value))return `<c r="${ref}"${style}><v>${value}</v></c>`;return `<c r="${ref}" t="inlineStr"${style}><is><t xml:space="preserve">${xml(value)}</t></is></c>`}).join('')}</row>`).join('')}</sheetData><autoFilter ref="A1:${colName(rows[0].length-1)}${Math.max(1,rows.length)}"/></worksheet>`}
+function timelineSheetXML(endRow){
+ const cells=[],matrix=new Map();for(const e of data.events){const key=e.age+':'+e.sud;matrix.set(key,(matrix.get(key)||0)+1)}
+ const header=['<c r="A1" t="inlineStr" s="1"><is><t>SUD / Alter</t></is></c>'];
+ for(let age=0;age<=37;age++)header.push(`<c r="${colName(age+1)}1" s="1"><v>${age}</v></c>`);
+ cells.push(`<row r="1">${header.join('')}</row>`);
+ for(let sud=10;sud>=0;sud--){const row=12-sud,parts=[`<c r="A${row}" s="1"><v>${sud}</v></c>`];
+  for(let age=0;age<=37;age++){
+   const col=colName(age+1),ref=col+row,count=matrix.get(age+':'+sud)||0;
+   const formula=`COUNTIFS(Erlebnisse!$B$2:$B$${endRow},${col}$1,Erlebnisse!$C$2:$C$${endRow},$A${row})`;
+   parts.push(`<c r="${ref}" s="2"><f>${formula}</f><v>${count}</v></c>`);
+  }
+  cells.push(`<row r="${row}" ht="23" customHeight="1">${parts.join('')}</row>`);
+ }
+ cells.push('<row r="14"><c r="A14" t="inlineStr"><is><t>Eintrag pro Kombination aus Alter und SUD. Mehrere Erlebnisse am gleichen Punkt erscheinen als Anzahl.</t></is></c></row>');
+ return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" xSplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"/></sheetView></sheetViews><cols><col min="1" max="1" width="18" customWidth="1"/><col min="2" max="39" width="5.5" customWidth="1"/></cols><sheetData>${cells.join('')}</sheetData><conditionalFormatting sqref="B2:AM12"><cfRule type="cellIs" dxfId="0" priority="1" operator="greaterThan"><formula>0</formula></cfRule></conditionalFormatting></worksheet>`;
+}
+function makeXlsx(){
+ const events=[['ID','Alter','SUD','Titel','Notiz','Cluster-IDs','Cluster-Namen'],...data.events.map(e=>[e.id,e.age,e.sud,e.title,e.notes,e.clusterIds.join(','),e.clusterIds.map(id=>data.clusters.find(c=>c.id===id)?.name||'').join(', ')])];
+ const clusters=[['ID','Name','Farbe','Beschreibung'],...data.clusters.map(c=>[c.id,c.name,c.color,c.notes])];
+ const help=[['SUD-Zeitleiste','Hinweise'],['Alter','0–37 (ganze Jahre)'],['SUD','0–10 (SUD-Skala)'],['Cluster-IDs','Mehrere IDs mit Komma trennen'],['Hinweis','Diese Excel-Datei enthält die Daten, aber keine HTML-Interaktivität.'],['Austausch','Excel-Datei kann nach Bearbeitung in die HTML-Anwendung importiert werden.'],['Datenschutz','Datei enthält persönliche Angaben unverschlüsselt.'],['Exportdatum',datePart()]];
+ const sheets=[sheetXML(events,[30,9,9,32,70,45,40]),sheetXML(clusters,[30,30,16,70]),sheetXML(help,[25,95]),timelineSheetXML(Math.max(1002,events.length+500))];
+ const types=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`;
+ const book=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${['Erlebnisse','Cluster','Hinweise','Zeitleiste'].map((n,i)=>`<sheet name="${n}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`;
+ const rels=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+ const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="0;-0;;@"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Aptos"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Aptos"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1F2A3A"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFill="1" applyFont="1"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"><alignment horizontal="center"/></xf></cellXfs><dxfs count="1"><dxf><font><b/><color rgb="FF53202B"/></font><fill><patternFill patternType="solid"><fgColor rgb="FFF2B2AD"/><bgColor indexed="64"/></patternFill></fill></dxf></dxfs></styleSheet>`;
+ return zipStored([['[Content_Types].xml',types],['_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'],['xl/workbook.xml',book],['xl/_rels/workbook.xml.rels',rels],['xl/styles.xml',styles],...sheets.map((s,i)=>['xl/worksheets/sheet'+(i+1)+'.xml',s])]);
+}
+$('excel-btn').addEventListener('click',()=>downloadBlob(makeXlsx(),'SUD_Zeitleiste_'+datePart()+'.xlsx'));
+/* Excel import supports both uncompressed exports and deflated files saved by Excel. */
+const get16=(dv,o)=>dv.getUint16(o,true),get32=(dv,o)=>dv.getUint32(o,true);
+async function extractZip(blob){
+ const buf=await blob.arrayBuffer(),dv=new DataView(buf),bytes=new Uint8Array(buf);let end=-1;
+ for(let i=buf.byteLength-22;i>=Math.max(0,buf.byteLength-65557);i--)if(get32(dv,i)===0x06054b50){end=i;break}
+ if(end<0)throw Error('Excel-Datei konnte nicht gelesen werden (ZIP-Verzeichnis fehlt).');
+ const count=get16(dv,end+10),files=new Map(),decoder=new TextDecoder();let cursor=get32(dv,end+16);
+ for(let i=0;i<count;i++){
+  if(get32(dv,cursor)!==0x02014b50)throw Error('Excel-Datei enthält ein ungültiges ZIP-Verzeichnis.');
+  const method=get16(dv,cursor+10),length=get32(dv,cursor+20),nlen=get16(dv,cursor+28),xlen=get16(dv,cursor+30),clen=get16(dv,cursor+32),offset=get32(dv,cursor+42),name=decoder.decode(bytes.subarray(cursor+46,cursor+46+nlen));cursor+=46+nlen+xlen+clen;
+  if(!name.match(/^xl\/(worksheets\/sheet\d+\.xml|sharedStrings\.xml)$/))continue;
+  if(get32(dv,offset)!==0x04034b50)throw Error('Excel-Datei enthält einen ungültigen ZIP-Eintrag.');
+  const start=offset+30+get16(dv,offset+26)+get16(dv,offset+28);const payload=bytes.slice(start,start+length);let raw;
+  if(method===0)raw=payload;
+  else if(method===8&&typeof DecompressionStream!=='undefined'){const ds=new DecompressionStream('deflate-raw');raw=new Uint8Array(await new Response(new Blob([payload]).stream().pipeThrough(ds)).arrayBuffer())}
+  else throw Error('Diese Excel-Komprimierung wird im Browser nicht unterstützt. Bitte die Datei als JSON oder CSV importieren.');
+  files.set(name,decoder.decode(raw));
+ }
+ return files;
+}
+function parseSheet(xmlText,shared){
+ const dom=new DOMParser().parseFromString(xmlText,'application/xml');if(dom.querySelector('parsererror'))throw Error('Die Excel-Tabelle enthält ungültiges XML.');
+ const out=[];
+ for(const r of [...dom.getElementsByTagNameNS('*','row')]){
+  const cells=[];
+  for(const c of [...r.getElementsByTagNameNS('*','c')]){
+   const ref=c.getAttribute('r')||'',letters=ref.match(/^[A-Z]+/)?.[0]||'A';let col=0;for(const ch of letters)col=col*26+ch.charCodeAt(0)-64;col--;
+   const type=c.getAttribute('t'),v=c.getElementsByTagNameNS('*','v')[0]?.textContent??'';
+   const is=[...c.getElementsByTagNameNS('*','is')].flatMap(n=>[...n.getElementsByTagNameNS('*','t')].map(x=>x.textContent)).join('');
+   cells[col]=type==='s'?(shared[Number(v)]||''):type==='inlineStr'?is:type==='n'||!type?(v===''?'':Number(v)):v;
+  }
+  out.push(cells);
+ }
+ return out;
+}
+function fromSheets(files){
+ let shared=[];
+ if(files.has('xl/sharedStrings.xml')){const doc=new DOMParser().parseFromString(files.get('xl/sharedStrings.xml'),'application/xml');shared=[...doc.getElementsByTagNameNS('*','si')].map(si=>[...si.getElementsByTagNameNS('*','t')].map(t=>t.textContent).join(''))}
+ let evRows=null,clRows=null;
+ for(const [name,contents] of files){if(!name.includes('/worksheets/'))continue;const rows=parseSheet(contents,shared);
+  for(let j=0;j<Math.min(rows.length,20);j++){
+   const hdr=rows[j].map(x=>String(x??'').trim().toLocaleLowerCase('de'));
+   if(hdr.includes('alter')&&hdr.includes('sud')&&hdr.includes('titel'))evRows={rows:rows.slice(j+1),hdr};
+   if(hdr.includes('name')&&hdr.includes('farbe')&&hdr.includes('id'))clRows={rows:rows.slice(j+1),hdr};
+  }
+ }
+ if(!evRows)throw Error('Kein Tabellenblatt mit „Alter“, „SUD“ und „Titel“ gefunden.');
+ const field=(row,head,key)=>row[head.indexOf(key)];
+ const clusters=(clRows?.rows||[]).filter(r=>String(field(r,clRows.hdr,'name')||'').trim()).map(r=>({id:String(field(r,clRows.hdr,'id')||uid()),name:String(field(r,clRows.hdr,'name')||'Cluster'),color:String(field(r,clRows.hdr,'farbe')||COLORS[0]),notes:String(field(r,clRows.hdr,'beschreibung')||'')}));
+ const events=evRows.rows.filter(r=>String(field(r,evRows.hdr,'titel')||'').trim()).map(r=>({id:String(field(r,evRows.hdr,'id')||uid()),age:Number(field(r,evRows.hdr,'alter')),sud:Number(field(r,evRows.hdr,'sud')),title:String(field(r,evRows.hdr,'titel')),notes:String(field(r,evRows.hdr,'notiz')||''),clusterIds:String(field(r,evRows.hdr,'cluster-ids')||'').split(',').map(s=>s.trim()).filter(Boolean)}));
+ return normalize({events,clusters});
+}
+function readCSV(text){
+ text=text.replace(/^\ufeff/,'');const delim=text.split(/\r?\n/,1)[0].includes(';')?';':',';
+ const rows=[];let row=[],cell='',quoted=false;
+ for(let i=0;i<text.length;i++){const ch=text[i];if(quoted){if(ch==='"'&&text[i+1]==='"'){cell+='"';i++}else if(ch==='"')quoted=false;else cell+=ch}else if(ch==='"')quoted=true;else if(ch===delim){row.push(cell);cell=''}else if(ch==='\n'){row.push(cell.replace(/\r$/,''));rows.push(row);row=[];cell=''}else cell+=ch}
+ if(cell||row.length){row.push(cell);rows.push(row)}
+ const hdr=rows.shift().map(x=>x.trim().toLowerCase());const v=(r,n)=>r[hdr.indexOf(n)];
+ if(!hdr.includes('alter')||!hdr.includes('sud')||!hdr.includes('titel'))throw Error('CSV braucht Spalten „Alter“, „SUD“ und „Titel“.');
+ return normalize({clusters:[],events:rows.filter(r=>v(r,'titel')).map(r=>({id:v(r,'id')||uid(),age:Number(v(r,'alter')),sud:Number(v(r,'sud')),title:v(r,'titel'),notes:v(r,'notiz')||'',clusterIds:[]}))});
+}
+$('import-btn').addEventListener('click',()=>{$('file-picker').value='';$('file-picker').click()});
+$('file-picker').addEventListener('change',async e=>{
+ const f=e.target.files?.[0];if(!f)return;
+ try{
+  let incoming;
+  if(f.name.toLowerCase().endsWith('.json'))incoming=normalize(JSON.parse(await f.text()));
+  else if(f.name.toLowerCase().endsWith('.csv'))incoming=readCSV(await f.text());
+  else if(f.name.toLowerCase().endsWith('.xlsx'))incoming=fromSheets(await extractZip(f));
+  else throw Error('Bitte JSON, CSV oder XLSX auswählen.');
+  if((data.events.length||data.clusters.length)&&!confirm(`Vorhandene Daten ersetzen? Die Datei enthält ${incoming.events.length} Einträge und ${incoming.clusters.length} Cluster. Sichere deine bisherigen Daten zuerst bei Bedarf.`))return;
+  data=incoming;selectedId=null;editorDraft=null;$('search').value='';$('filter-cluster').value='all';persist();render();setStatus('Daten aus Datei geladen');
+ }catch(err){alert('Import fehlgeschlagen: '+(err?.message||err));console.error(err)}
+});
+load();render();
+</script>
+<script src="/cloud.js" defer></script>
+</body>
+</html>
