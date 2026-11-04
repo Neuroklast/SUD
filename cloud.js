@@ -11,6 +11,7 @@
 
   const fragment = new URLSearchParams(location.hash.slice(1));
   const setupToken = fragment.get('setup');
+  el('change-password').style.display = setupToken ? '' : 'none';
   if (setupToken) history.replaceState(null, '', location.pathname + location.search);
 
   let configured = false;
@@ -171,7 +172,7 @@
     el('access-message').textContent = '';
     try {
       await request('/api/auth', 'POST', changeMode
-        ? { action: 'change', password: pass }
+        ? { action: 'change', password: pass, setupToken }
         : configured ? { action: 'login', password: pass }
         : { action: 'setup', setupToken, password: pass });
       if (!changeMode) {
