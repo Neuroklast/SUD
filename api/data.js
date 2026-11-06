@@ -45,6 +45,22 @@ function validData(value) {
     Array.isArray(value.events) && Array.isArray(value.clusters) &&
     value.events.length <= 20_000 && value.clusters.length <= 1500;
 }
+function validateDeletes(value) {
+  const result = { events: [], clusters: [] };
+  if (value === undefined || value === null) return result;
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw storageError('INVALID_DELETIONS', 'Invalid deletion metadata', 400);
+  }
+  for (const type of ['events', 'clusters']) {
+    const ids = value[type] || [];
+    if (!Array.isArray(ids) || ids.length > 20000 ||
+        ids.some(id => typeof id !== 'string' || !id.length || id.length > 100)) {
+      throw storageError('INVALID_DELETIONS', 'Invalid deletion IDs', 400);
+    }
+    result[type] = [...new Set(ids)];
+  }
+  return result;
+}
 function storageError(code, message, status = 503) {
   return Object.assign(new Error(message), { code, status });
 }
@@ -135,6 +151,7 @@ async function loadOperation(blob) {
   if (op?.format !== 'sud-change-v1' || !validData(op.base) || !validData(op.data)) {
     throw storageError('INVALID_OPERATION', 'Invalid journal record', 502);
   }
+  validateDeletes(op.deletions);
   if (operationCache.size > 512) operationCache.clear();
   operationCache.set(blob.pathname, op);
   return op;
@@ -150,19 +167,40 @@ async function snapshot(knownEtag = null, requiredPath = null) {
   const etag = '"' + hash.digest('hex') + '"';
   if (knownEtag === etag) return { unchanged: true, etag };
   let document = original.data;
+  const deletedEvents = new Set();
+  const deletedClusters = new Set();
   // Apply each independent edit relative to the base that its author saw.
   // No writer ever overwrites another writer's blob.
   for (const item of operations) {
     const op = await loadOperation(item);
     document = mergeData(op.base, op.data, document).data;
+    const explicit = validateDeletes(op.deletions);
+    for (const id of explicit.events) deletedEvents.add(id);
+    for (const id of explicit.clusters) deletedClusters.add(id);
+    // Apply tombstones after merging, so stale clients cannot recreate records.
+    document = {
+      ...document,
+      events: document.events.filter(entry => !deletedEvents.has(entry.id)).map(entry => ({
+        ...entry,
+        clusterIds: entry.clusterIds.filter(id => !deletedClusters.has(id))
+      })),
+      clusters: document.clusters.filter(cluster => !deletedClusters.has(cluster.id))
+    };
   }
   if (!validData(document)) throw storageError('INVALID_RESULT', 'Merged state invalid', 502);
-  return { data: document, etag, count: operations.length };
+  return {
+    data: document,
+    etag,
+    count: operations.length,
+    deleted: { events: [...deletedEvents], clusters: [...deletedClusters] }
+  };
 }
 
-async function appendChange(base, incoming) {
-  if (equal(base, incoming)) return snapshot();
-  const op = { format: 'sud-change-v1', base, data: incoming };
+async function appendChange(base, incoming, deletions) {
+  const explicit = validateDeletes(deletions);
+  if (equal(base, incoming) && !explicit.events.length && !explicit.clusters.length) return snapshot();
+  const op = { format: 'sud-change-v1', base, data: incoming,
+    ...(explicit.events.length || explicit.clusters.length ? { deletions: explicit } : {}) };
   const fingerprint = createHash('sha256').update(JSON.stringify(op)).digest('hex');
   const pathname = CHANGES_PREFIX + fingerprint + '.json';
   try {
@@ -215,7 +253,7 @@ export default async function handler(req, res) {
         return res.end();
       }
       res.setHeader('ETag', state.etag);
-      return json(res, 200, { data: state.data, etag: state.etag });
+      return json(res, 200, { data: state.data, etag: state.etag, deleted: state.deleted });
     }
 
     if (Number(req.headers['content-length'] || 0) > REQUEST_LIMIT) {
@@ -226,8 +264,8 @@ export default async function handler(req, res) {
         Buffer.byteLength(JSON.stringify(input), 'utf8') > REQUEST_LIMIT) {
       return json(res, 400, { error: 'Ungültiger Datenstand' });
     }
-    const saved = await appendChange(input.base, input.data);
-    return json(res, 200, { ok: true, data: saved.data, etag: saved.etag, conflictCount: 0 });
+    const saved = await appendChange(input.base, input.data, input.deletions);
+    return json(res, 200, { ok: true, data: saved.data, etag: saved.etag, deleted: saved.deleted, conflictCount: 0 });
   } catch (error) {
     if (error?.status) {
       if (error.status === 503) res.setHeader('Retry-After', '5');
