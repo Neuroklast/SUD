@@ -2,6 +2,9 @@
 
 Interaktive Zeitleiste für Alter 0 bis 37 und SUD-Werte 0 bis 10. Ereignisse, Notizen, Cluster, Datenimport und JSON-/CSV-/XLSX-/Offline-HTML-Export.
 
+**Zeitachse:** Unter dem Diagramm kann zwischen `Alter` und `Jahr` umgeschaltet werden. In der Jahresansicht wird Alter 0 als 1989 und Alter 37 als 2026 beschriftet. Grundlage ist der Geburtstag am 28.09.1989. Da ein ganzzahliges Alter jeweils bis zum nächsten Geburtstag gilt, kann ein Erlebnis auch im Kalenderjahr nach der dargestellten Zahl stattgefunden haben. Der Wechsel betrifft nur die Diagrammbeschriftung, nicht die Einträge, Datenexporte oder Cloud-Synchronisation. Die Anzeigeauswahl wird ausschließlich lokal im Browser gespeichert.
+
+
 ## Hosting
 
 Deployment: Vercel, Framework Other, kein Build-Schritt, GitHub-Neudeploy bei Push auf `main`.
