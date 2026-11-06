@@ -11,7 +11,7 @@ Die Anwendung verwendet ein einziges gemeinsam festgelegtes Passwort. Jeder, der
 Serverfunktionen:
 
 - `api/auth.js`: Passwort-Ersteinrichtung über einen einmaligen, geheimen Einrichtungslink, Login, Passwortwechsel und Logout.
-- `api/data.js`: Private Lese- und Schreibzugriffe mit signierter Sitzung, AES-256-GCM-Verschlüsselung sowie serverseitigem Zusammenführen paralleler Bearbeitungen und begrenzten ETag-Retrys.
+- `api/data.js`: Private Lese- und Schreibzugriffe mit signierter Sitzung, AES-256-GCM-Verschlüsselung sowie serverseitigem Zusammenführen paralleler Bearbeitungen und einem unveränderlichen Änderungsjournal ohne überschreibende Cloud-Writes.
 - `lib/auth.js`: PBKDF2-SHA256-Passworthash, 310000 Iterationen, zufälliges Salt. Sichere HttpOnly-Cookies mit HMAC-Signatur, `SameSite=Strict`, eine Woche Gültigkeit.
 - `cloud.js`: Automatisches Laden, Zusammenführen, Speichern und Abgleichen der Cloud-Daten mit anderen geöffneten Sitzungen.
 - `sync-core.js`: Feldweises Zusammenführen gleichzeitig bearbeiteter Ereignisse und Cluster anhand ihrer IDs und der letzten gemeinsamen Version.
@@ -35,14 +35,22 @@ Die Offline-HTML-Datei funktioniert ohne Vercel und ohne Passwortdialog. Sie ent
 
 ## Einschränkungen
 
-Es handelt sich um eine gemeinsame Arbeitsmappe ohne getrennte Nutzerprofile. Alle mit dem Passwort sehen und bearbeiten denselben Datenbestand. Bei geöffneter Anwendung wird die Cloud aktiv ungefähr alle 3 Sekunden abgeglichen, bei längerer Inaktivität seltener. Gleichzeitig bearbeitete unterschiedliche Ereignisse oder Felder werden serverseitig automatisch zusammengeführt. Werden exakt dieselben Felder gleichzeitig geändert, gilt die zuletzt erfolgreich gespeicherte Änderung. Gleichzeitige Löschungen haben Vorrang vor älteren Bearbeitungen. Dies ist ein kurzintervalliger Abgleich und kein WebSocket-Push-System.
+Es handelt sich um eine gemeinsame Arbeitsmappe ohne getrennte Nutzerprofile. Alle mit dem Passwort sehen und bearbeiten denselben Datenbestand. Bei geöffneter Anwendung wird die Cloud aktiv ungefähr alle 3 Sekunden abgeglichen, bei längerer Inaktivität seltener. Gleichzeitig bearbeitete unterschiedliche Ereignisse oder Felder werden serverseitig automatisch zusammengeführt. Werden exakt dieselben Felder gleichzeitig geändert, entscheidet die deterministische Reihenfolge der im Blob Store gespeicherten Änderungsdateien. Gleichzeitige Löschungen haben Vorrang vor älteren Bearbeitungen. Dies ist ein kurzintervalliger Abgleich und kein WebSocket-Push-System.
 
 Bei Verbindungsproblemen werden Änderungen im Browser vorgemerkt und nach Wiederherstellung der Verbindung unter Berücksichtigung der letzten bestätigten Cloud-Version synchronisiert. Beim ersten Öffnen übernimmt die Cloud die Rolle als führender Datenbestand. Ein abweichender alter Browser-Datenbestand wird einmalig lokal unter dem Schlüssel `portable-sud-timeline-v1-pre-cloud-backup-v2` gesichert und nicht ungefragt über die Cloud geschrieben. Ist der Cloud-Datenbestand noch leer, können vorhandene lokale Daten als Anfangsbestand hochgeladen werden. Der gemeinsame Zugang bleibt über das bestehende Passwort geschützt.
 
-Der Abgleich erfolgt derzeit über bedingte ETag-Abfragen an Vercel Blob, damit unveränderte Daten nicht jedes Mal erneut vollständig heruntergeladen werden. Bei vielen dauerhaft geöffneten Sitzungen entstehen trotzdem regelmäßige Serverless-Aufrufe. Für echten Push-Betrieb mit sehr vielen Nutzern wäre ein separates Realtime-Backend sinnvoll.
+Der Abgleich verwendet eine aus den unveränderlichen Änderungsdateien berechnete Datenversion. Unveränderte Daten müssen dabei nicht erneut vollständig heruntergeladen werden. Bei vielen dauerhaft geöffneten Sitzungen entstehen trotzdem regelmäßige Serverless-Aufrufe. Für echten Push-Betrieb mit sehr vielen Nutzern wäre ein separates Realtime-Backend sinnvoll.
 
 Das Werkzeug dient der persönlichen Dokumentation. Die Belastungswerte sind subjektiv und keine klinische Diagnose.
 
 ## Gleichzeitige Bearbeitung und Fehlerbehandlung
 
-Ab Version des serverseitigen Merge-Fixes sendet der Browser Änderungen als `PATCH /api/data` inklusive seines letzten bestätigten Datenstands. Der Server liest Vercel Blob mit `useCache: false`, führt die Änderungen feldweise zusammen und schreibt atomar nur mit dem aktuellen ETag. Bei kurzzeitigen Konkurrenzschreibvorgängen wiederholt er die Operation begrenzt selbst. Ein erneuter identischer Änderungsauftrag erzeugt keine neue Blob-Version. Bei länger anhaltender Nichtverfügbarkeit bleiben ausstehende Daten im lokalen Browser-Cache und werden mit zunehmender Pause erneut übertragen. Unterbrochene Verbindungen und echte Infrastrukturfehler können nicht als sofortige Synchronisierung dargestellt werden.
+Der Browser sendet Änderungen als `PATCH /api/data` mit der letzten lokal bestätigten Basisversion und dem aktuellen Datenstand. Der Server speichert jede Änderung verschlüsselt unter einem eindeutigen, inhaltsabhängigen Dateinamen in `sud/sync-v3/changes/`. Diese Dateien werden niemals überschrieben. Bei identischen erneut gesendeten Änderungen wird dieselbe Datei wiederverwendet. Gleichzeitige Schreibvorgänge können sich dadurch nicht mehr am ETag einer gemeinsamen Datei blockieren.
+
+Beim ersten Zugriff wird der vorhandene verschlüsselte Datenbestand aus `sud/timeline-v2.json` einmalig als unveränderliche Basiskopie nach `sud/sync-v3/baseline.json` übertragen. Die ursprüngliche Datei wird nicht gelöscht oder verändert. Anschließend werden die aufgezeichneten Änderungen in nachvollziehbarer Reihenfolge feldweise zusammengeführt. Der gemeinsame Datenstand wird über `GET /api/data` abgerufen. Der bisherige direkte `PUT` wird mit HTTP 426 abgewiesen, damit veraltete Browserversionen keine Änderungen anderer Nutzer überschreiben.
+
+Bei zeitweiligen Verbindungsstörungen bleiben Änderungen lokal gespeichert. Der Browser sendet sie nach Wiederherstellung der Verbindung erneut. Die einmalige Migration und die Wiederholung identischer Änderungen sind automatisch abgesichert. Für den Abgleich sind keine weiteren Umgebungsvariablen erforderlich.
+
+**Betriebsgrenzen:** Das Journal benötigt bei zunehmender Zahl an Änderungen mehr Lesezugriffe und Speicherplatz. Vor mehr als 10.000 Änderungsdateien ist eine kontrollierte, verlustfreie Kompaktierung erforderlich. Das System nutzt weiterhin Polling und ist kein WebSocket-Push. Nach dem Deployment sollte jeder offene Browser-Tab einmal neu geladen werden. Ein Rollback auf die alte Ein-Datei-Version wäre ohne Übernahme des Journals nicht datenstandsgleich.
+
+Tests: `node --test`. Die Tests decken insbesondere die einmalige Migration, gleichzeitig gespeicherte Änderungen, Wiederholungsanfragen und ETag-Abgleiche ab.
