@@ -29,6 +29,10 @@ function harness() {
     return { statusCode: 200, stream: new Response(stored.text).body,
       blob: { etag: stored.etag } };
   }
+  async function head(path) {
+    assert.equal(path, 'sud/timeline-v2.json');
+    return stored ? { etag: stored.etag } : null;
+  }
   async function put(path, payload, options) {
     assert.equal(path, 'sud/timeline-v2.json');
     if (failNextWrite) {
@@ -49,7 +53,7 @@ function harness() {
   }
   const context = {
     Buffer, Response, setTimeout, randomBytes, createCipheriv, createDecipheriv,
-    get, put, BlobPreconditionFailedError,
+    get, put, head, BlobPreconditionFailedError,
     process: { env: {
       BLOB_READ_WRITE_TOKEN: 'test',
       SUD_SESSION_SECRET: 'test-secret',
