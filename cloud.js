@@ -23,6 +23,7 @@
   const BASE_KEY = STORAGE_KEY + '-cloud-base-v2';
   const PENDING_KEY = STORAGE_KEY + '-pending-v2';
   const BACKUP_KEY = STORAGE_KEY + '-pre-cloud-backup-v2';
+  const DELETIONS_KEY = STORAGE_KEY + '-explicit-deletions-v1';
   const empty = () => ({ version: 1, events: [], clusters: [] });
   const snapshot = value => normalize(JSON.parse(JSON.stringify(value)));
   const status = (message, ok = true) => setStatus(message, ok);
@@ -43,6 +44,64 @@
   let lastActivity = Date.now();
   let lastConflictCount = 0;
   const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('sud-cloud-refresh-v2') : null;
+  function parseDeletes(value) {
+    return {
+      events: Array.isArray(value?.events) ? [...new Set(value.events.filter(id => typeof id === 'string'))] : [],
+      clusters: Array.isArray(value?.clusters) ? [...new Set(value.clusters.filter(id => typeof id === 'string'))] : []
+    };
+  }
+  let pendingDeletes = { events: [], clusters: [] };
+  try { pendingDeletes = parseDeletes(JSON.parse(localStorage.getItem(DELETIONS_KEY) || '{}')); }
+  catch (_) { /* No locally queued deletions yet. */ }
+
+  // Only user-confirmed deletion actions create tombstones. Missing records in
+  // old browser snapshots must never be treated as delete instructions.
+  window.SUDRecordDeletion = (type, id) => {
+    const key = type === 'event' ? 'events' : type === 'cluster' ? 'clusters' : null;
+    if (!key || typeof id !== 'string' || !id) return;
+    if (!pendingDeletes[key].includes(id)) pendingDeletes[key].push(id);
+    try { localStorage.setItem(DELETIONS_KEY, JSON.stringify(pendingDeletes)); }
+    catch (_) { status('Löschung lokal nicht gesichert. Bitte JSON exportieren.', false); }
+  };
+  function combinedDeletes(remote) {
+    const server = parseDeletes(remote);
+    return {
+      events: [...new Set([...server.events, ...pendingDeletes.events])],
+      clusters: [...new Set([...server.clusters, ...pendingDeletes.clusters])]
+    };
+  }
+  function excludeDeleted(source, deleted) {
+    const del = combinedDeletes(deleted);
+    const events = new Set(del.events);
+    const clusters = new Set(del.clusters);
+    return {
+      version: 1,
+      events: source.events.filter(entry => !events.has(entry.id)).map(entry => ({
+        ...entry, clusterIds: entry.clusterIds.filter(id => !clusters.has(id))
+      })),
+      clusters: source.clusters.filter(cluster => !clusters.has(cluster.id))
+    };
+  }
+  // If the server returns an incomplete snapshot, keep locally present records.
+  // Only explicit confirmed tombstones are permitted to remove an ID.
+  function preserveMissing(local, remote, deleted) {
+    const foundEvents = new Set(remote.events.map(entry => entry.id));
+    const foundClusters = new Set(remote.clusters.map(cluster => cluster.id));
+    const filtered = {
+      version: 1,
+      events: [...remote.events, ...local.events.filter(entry => !foundEvents.has(entry.id))],
+      clusters: [...remote.clusters, ...local.clusters.filter(cluster => !foundClusters.has(cluster.id))]
+    };
+    return normalize(excludeDeleted(filtered, deleted));
+  }
+  function storePendingDeletes() {
+    try {
+      if (pendingDeletes.events.length || pendingDeletes.clusters.length) {
+        localStorage.setItem(DELETIONS_KEY, JSON.stringify(pendingDeletes));
+      } else localStorage.removeItem(DELETIONS_KEY);
+    } catch (_) { status('Ausstehende Löschungen konnten nicht lokal gesichert werden.', false); }
+  }
+
 
   const show = (mode = 'login') => {
     changeMode = mode === 'change';
@@ -174,28 +233,42 @@
     const startRevision = revision;
     const startDocument = snapshot(data);
     const originalBase = snapshot(baseSnapshot || empty());
+    const sentDeletes = parseDeletes(pendingDeletes);
     let failed = false;
     try {
       const result = await request('/api/data', 'PATCH', {
         base: originalBase,
-        data: startDocument
+        data: startDocument,
+        deletions: sentDeletes
       });
       if (result.etag === undefined || !result.data) throw Error('Server hat keine bestätigte Datenversion zurückgegeben');
       const stored = snapshot(result.data);
+      const serverDeleted = parseDeletes(result.deleted);
+      for (const key of ['events', 'clusters']) {
+        if (sentDeletes[key].some(id => !serverDeleted[key].includes(id))) {
+          throw Error('Löschung wurde vom Server nicht bestätigt');
+        }
+      }
+      // A confirmed tombstone is the only permitted reason for losing a record.
+      for (const key of ['events', 'clusters']) {
+        pendingDeletes[key] = pendingDeletes[key].filter(id => !sentDeletes[key].includes(id));
+      }
+      storePendingDeletes();
       etag = result.etag;
       baseSnapshot = stored;
-      // Preserve edits made after the request started.
       const current = snapshot(data);
-      const next = revision === startRevision ? stored :
+      const merged = revision === startRevision ? stored :
         snapshot(sync.mergeData(startDocument, current, stored).data);
-      applyDocument(next, true);
-      dirty = !sync.equal(next, stored);
+      const restored = preserveMissing(current, merged, serverDeleted);
+      applyDocument(restored, true);
+      dirty = !sync.equal(restored, stored) ||
+        pendingDeletes.events.length > 0 || pendingDeletes.clusters.length > 0;
       storeSyncState();
       retryDelay = 3000;
-      status(dirty ? 'Weitere Änderungen werden gespeichert …' :
+      status(dirty ? 'Unvollständige Cloud-Antwort erkannt. Daten werden erneut abgeglichen …' :
         result.conflictCount
           ? 'Synchronisiert. ' + result.conflictCount + ' gleichzeitig bearbeitete Felder zusammengeführt.'
-          : 'Cloud synchronisiert');
+          : 'Cloud synchronisiert', !dirty);
       channel?.postMessage({ type: 'updated' });
     } catch (error) {
       if (error.status === 401) return;
@@ -232,23 +305,19 @@
       pending = pending || localStorage.getItem(PENDING_KEY) === '1';
     } catch (_) { /* Continue from the cloud copy. */ }
 
-    let next = cloud;
-    if (pending && previouslySynced) {
-      const merged = sync.mergeData(previouslySynced, local, cloud);
-      next = normalize(merged.data);
-      lastConflictCount += merged.conflicts.length;
-    } else if (!remote.data && !previouslySynced && (local.events.length || local.clusters.length)) {
-      // Initial migration into an empty cloud, protected by conditional PUT.
-      next = local;
-    } else if (!sync.equal(local, cloud) && (local.events.length || local.clusters.length)) {
-      // Keep an older browser-only snapshot without silently restoring deleted cloud entries.
+    if (!sync.equal(local, cloud) && (local.events.length || local.clusters.length)) {
       keepLegacyBackup(local);
     }
+    const base = previouslySynced || empty();
+    const merged = sync.mergeData(base, local, cloud);
+    lastConflictCount += merged.conflicts.length;
+    const next = preserveMissing(local, normalize(merged.data), remote.deleted);
 
     etag = remote.etag;
     baseSnapshot = snapshot(cloud);
     applyDocument(next, false);
-    dirty = !sync.equal(next, cloud);
+    dirty = !sync.equal(next, cloud) || pendingDeletes.events.length > 0 ||
+      pendingDeletes.clusters.length > 0;
     ready = true;
     storeSyncState();
     if (dirty) queueSave();
@@ -268,11 +337,12 @@
         ? sync.mergeData(baseSnapshot || empty(), current, cloud)
         : { data: cloud, conflicts: [] };
       lastConflictCount += merged.conflicts.length;
-      const next = normalize(merged.data);
+      const next = preserveMissing(current, normalize(merged.data), remote.deleted);
       etag = remote.etag;
       baseSnapshot = snapshot(cloud);
       applyDocument(next, true);
-      dirty = !sync.equal(next, cloud);
+      dirty = !sync.equal(next, cloud) || pendingDeletes.events.length > 0 ||
+        pendingDeletes.clusters.length > 0;
       storeSyncState();
       if (dirty) queueSave();
       else status('Cloud synchronisiert');

@@ -34,14 +34,18 @@ test('same field collision is detected and the latest local save wins', () => {
   assert.deepEqual(result.conflicts, [{ type: 'event', id: 'a', field: 'title' }]);
 });
 
-test('remote deletion is not undone by a stale local change', () => {
+test('a missing remote record cannot erase a local record', () => {
   const base = doc([event('a')]);
-  assert.deepEqual(mergeData(base, doc([event('a', 'stale change')]), doc()).data.events, []);
+  assert.deepEqual(mergeData(base, doc([event('a', 'stale change')]), doc()).data.events, [event('a', 'stale change')]);
 });
 
-test('local deletion wins even if another user modified the event', () => {
+test('a missing local record cannot erase a remote record', () => {
   const base = doc([event('a')]);
-  assert.deepEqual(mergeData(base, doc(), doc([event('a', 'changed')])).data.events, []);
+  assert.deepEqual(mergeData(base, doc(), doc([event('a', 'changed')])).data.events, [event('a', 'changed')]);
+});
+test('a record missing from both snapshots survives without an explicit tombstone', () => {
+  const base = doc([event('a')]);
+  assert.deepEqual(mergeData(base, doc(), doc()).data.events, [event('a')]);
 });
 
 test('simultaneous additions keep both UUIDs', () => {
@@ -50,13 +54,13 @@ test('simultaneous additions keep both UUIDs', () => {
   assert.deepEqual(merged.data.events.map(e => e.id), ['remote', 'local']);
 });
 
-test('removed clusters are stripped from event relationships', () => {
+test('missing cluster snapshots do not silently delete cluster relationships', () => {
   const cluster = { id: 'group', name: 'Group', notes: '', color: '#ef8682' };
   const ev = { ...event('a'), clusterIds: ['group'] };
   const base = doc([ev], [cluster]);
   const merged = mergeData(base, base, doc([ev]));
-  assert.equal(merged.data.clusters.length, 0);
-  assert.deepEqual(merged.data.events[0].clusterIds, []);
+  assert.equal(merged.data.clusters.length, 1);
+  assert.deepEqual(merged.data.events[0].clusterIds, ['group']);
 });
 
 test('unchanged merged document is byte-for-byte equivalent to canonical input', () => {

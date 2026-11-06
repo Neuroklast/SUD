@@ -9,7 +9,9 @@
     const baseMap = new Map(base.map(item => [item.id, item]));
     const localMap = new Map(local.map(item => [item.id, item]));
     const remoteMap = new Map(remote.map(item => [item.id, item]));
-    const ids = new Set([...remoteMap.keys(), ...localMap.keys()]);
+    // Include the shared ancestor, even if *both* snapshots accidentally
+    // dropped the record. Only explicit tombstones can authorize removal.
+    const ids = new Set([...baseMap.keys(), ...remoteMap.keys(), ...localMap.keys()]);
     const merged = [];
 
     for (const id of ids) {
@@ -17,8 +19,22 @@
       const mine = localMap.get(id);
       const theirs = remoteMap.get(id);
       if (before) {
-        // Explicit local and remote deletions both win over outdated copies.
-        if (!mine || !theirs) continue;
+        // Missing IDs in a whole-document snapshot are NOT deletions.
+        // Only explicit deletion operations may remove records.
+        // Without this safeguard, an incomplete/stale tab permanently
+        // erased records from the shared timeline.
+        if (!mine && !theirs) {
+          merged.push(before);
+          continue;
+        }
+        if (!mine) {
+          merged.push(theirs);
+          continue;
+        }
+        if (!theirs) {
+          merged.push(mine);
+          continue;
+        }
         const next = { id };
         for (const field of fields) {
           const localChanged = !equal(mine[field], before[field]);
