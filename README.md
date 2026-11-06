@@ -13,7 +13,8 @@ Serverfunktionen:
 - `api/auth.js`: Passwort-Ersteinrichtung über einen einmaligen, geheimen Einrichtungslink, Login, Passwortwechsel und Logout.
 - `api/data.js`: Private Lese- und Schreibzugriffe mit signierter Sitzung, konfliktgeschützten ETags und serverseitiger AES-256-GCM-Verschlüsselung.
 - `lib/auth.js`: PBKDF2-SHA256-Passworthash, 310000 Iterationen, zufälliges Salt. Sichere HttpOnly-Cookies mit HMAC-Signatur, `SameSite=Strict`, eine Woche Gültigkeit.
-- `cloud.js`: Automatisches Laden, Speichern nach Änderungen und minimalistisches Passwortfenster.
+- `cloud.js`: Automatisches Laden, Zusammenführen, Speichern und Abgleichen der Cloud-Daten mit anderen geöffneten Sitzungen.
+- `sync-core.js`: Feldweises Zusammenführen gleichzeitig bearbeiteter Ereignisse und Cluster anhand ihrer IDs und der letzten gemeinsamen Version.
 
 Persistenz: **Vercel Blob (private)**. Keine Supabase-Datenbank, keine Cloud-Setup-Eingabefelder in der Oberfläche.
 
@@ -34,6 +35,10 @@ Die Offline-HTML-Datei funktioniert ohne Vercel und ohne Passwortdialog. Sie ent
 
 ## Einschränkungen
 
-Es handelt sich um eine gemeinsame Arbeitsmappe ohne getrennte Nutzerprofile. Alle mit dem Passwort sehen und bearbeiten denselben Datenbestand. Gleichzeitige Änderungen können einen ETag-Konflikt ergeben, der nicht automatisch überschrieben wird. Vor Wechseln zwischen Geräten sicherstellen, dass alle Änderungen gespeichert wurden.
+Es handelt sich um eine gemeinsame Arbeitsmappe ohne getrennte Nutzerprofile. Alle mit dem Passwort sehen und bearbeiten denselben Datenbestand. Bei geöffneter Anwendung wird die Cloud aktiv ungefähr alle 3 Sekunden abgeglichen, bei längerer Inaktivität seltener. Gleichzeitig bearbeitete unterschiedliche Ereignisse oder Felder werden automatisch zusammengeführt. Werden exakt dieselben Felder gleichzeitig geändert, gilt die zuletzt erfolgreich gespeicherte Änderung. Gleichzeitige Löschungen haben Vorrang vor älteren Bearbeitungen. Dies ist ein kurzintervalliger Abgleich und kein WebSocket-Push-System.
+
+Bei Verbindungsproblemen werden Änderungen im Browser vorgemerkt und nach Wiederherstellung der Verbindung unter Berücksichtigung der letzten bestätigten Cloud-Version synchronisiert. Beim ersten Öffnen übernimmt die Cloud die Rolle als führender Datenbestand. Ein abweichender alter Browser-Datenbestand wird einmalig lokal unter dem Schlüssel `portable-sud-timeline-v1-pre-cloud-backup-v2` gesichert und nicht ungefragt über die Cloud geschrieben. Ist der Cloud-Datenbestand noch leer, können vorhandene lokale Daten als Anfangsbestand hochgeladen werden. Der gemeinsame Zugang bleibt über das bestehende Passwort geschützt.
+
+Der Abgleich erfolgt derzeit über bedingte ETag-Abfragen an Vercel Blob, damit unveränderte Daten nicht jedes Mal erneut vollständig heruntergeladen werden. Bei vielen dauerhaft geöffneten Sitzungen entstehen trotzdem regelmäßige Serverless-Aufrufe. Für echten Push-Betrieb mit sehr vielen Nutzern wäre ein separates Realtime-Backend sinnvoll.
 
 Das Werkzeug dient der persönlichen Dokumentation. Die Belastungswerte sind subjektiv und keine klinische Diagnose.
