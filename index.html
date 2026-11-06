@@ -237,7 +237,7 @@ $('event-form').addEventListener('submit',e=>{
  const idx=data.events.findIndex(x=>x.id===entry.id);if(idx<0)data.events.push(entry);else data.events[idx]=entry;
  selectedId=entry.id;editorDraft=null;persist();render();
 });
-$('delete-event').addEventListener('click',()=>{if(!selectedId)return;const entry=data.events.find(e=>e.id===selectedId);if(confirm(`Eintrag „${entry?.title||''}“ wirklich löschen?`)){data.events=data.events.filter(e=>e.id!==selectedId);closeEvent();persist()}});
+$('delete-event').addEventListener('click',()=>{if(!selectedId)return;const entry=data.events.find(e=>e.id===selectedId);if(confirm(`Eintrag „${entry?.title||''}“ wirklich löschen?`)){window.SUDRecordDeletion?.('event', selectedId);data.events=data.events.filter(e=>e.id!==selectedId);closeEvent();persist()}});
 $('cancel-event').addEventListener('click',closeEvent);$('new-event').addEventListener('click',()=>openNew(0,5));$('empty-new').addEventListener('click',()=>openNew(0,5));
 $('chart').addEventListener('click',evt=>{
  const point=evt.target.closest?.('[data-event]');if(point){openEvent(point.getAttribute('data-event'));return;}
@@ -272,7 +272,7 @@ $('cluster-form').addEventListener('submit',e=>{
  }
 });
 function readEditorFields(){if($('event-form').hidden)return null;return {id:selectedId||null,title:$('event-title').value,age:Number($('event-age').value),sud:Number($('event-sud').value),notes:$('event-notes').value,clusterIds:[...document.querySelectorAll('[name="event-cluster"]:checked')].map(x=>x.value)}}
-$('cluster-delete').addEventListener('click',()=>{const c=data.clusters.find(c=>c.id===editingClusterId);if(!c)return;const count=data.events.filter(e=>e.clusterIds.includes(c.id)).length;if(!confirm(`Cluster „${c.name}“ löschen? ${count} zugeordnete Ereignisse bleiben erhalten.`))return;data.clusters=data.clusters.filter(x=>x.id!==c.id);for(const e of data.events)e.clusterIds=e.clusterIds.filter(id=>id!==c.id);closeClusterDialog();persist();render()});
+$('cluster-delete').addEventListener('click',()=>{const c=data.clusters.find(c=>c.id===editingClusterId);if(!c)return;const count=data.events.filter(e=>e.clusterIds.includes(c.id)).length;if(!confirm(`Cluster „${c.name}“ löschen? ${count} zugeordnete Ereignisse bleiben erhalten.`))return;window.SUDRecordDeletion?.('cluster', c.id);data.clusters=data.clusters.filter(x=>x.id!==c.id);for(const e of data.events)e.clusterIds=e.clusterIds.filter(id=>id!==c.id);closeClusterDialog();persist();render()});
 function downloadBlob(blob,file){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=file;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
 function downloadText(text,file,type){downloadBlob(new Blob([text],{type}),file)}
 $('json-btn').addEventListener('click',()=>downloadText(JSON.stringify(data,null,2),'SUD_Zeitleiste_'+datePart()+'.json','application/json;charset=utf-8'));
@@ -291,7 +291,7 @@ $('csv-btn').addEventListener('click',()=>{
  const rows=[['ID','Alter','SUD','Titel','Notiz','Cluster-IDs','Cluster-Namen'],...data.events.map(e=>[e.id,e.age,e.sud,e.title,e.notes,e.clusterIds.join(','),e.clusterIds.map(id=>data.clusters.find(c=>c.id===id)?.name||'').join(', ')])];
  downloadText('\ufeff'+rows.map(row=>row.map(csvCell).join(';')).join('\r\n'),'SUD_Zeitleiste_'+datePart()+'.csv','text/csv;charset=utf-8');
 });
-$('clear-btn').addEventListener('click',()=>{if(!confirm('Wirklich alle Einträge und Cluster aus dieser geöffneten Anwendung löschen? Erstelle vorher bei Bedarf eine Sicherung.'))return;data=emptyData();selectedId=null;editorDraft=null;persist();render()});
+$('clear-btn').addEventListener('click',()=>{if(!confirm('Wirklich alle Einträge und Cluster aus dieser geöffneten Anwendung löschen? Erstelle vorher bei Bedarf eine Sicherung.'))return;for(const entry of data.events)window.SUDRecordDeletion?.('event',entry.id);for(const cluster of data.clusters)window.SUDRecordDeletion?.('cluster',cluster.id);data=emptyData();selectedId=null;editorDraft=null;persist();render()});
 /* Standalone XLSX export. ZIP stored method 0, no JS packages or remote CDNs. */
 const encoder=new TextEncoder();
 function le16(out,pos,num){out[pos]=num&255;out[pos+1]=(num>>>8)&255}
@@ -407,7 +407,7 @@ $('file-picker').addEventListener('change',async e=>{
   else if(f.name.toLowerCase().endsWith('.xlsx'))incoming=fromSheets(await extractZip(f));
   else throw Error('Bitte JSON, CSV oder XLSX auswählen.');
   if((data.events.length||data.clusters.length)&&!confirm(`Vorhandene Daten ersetzen? Die Datei enthält ${incoming.events.length} Einträge und ${incoming.clusters.length} Cluster. Sichere deine bisherigen Daten zuerst bei Bedarf.`))return;
-  data=incoming;selectedId=null;editorDraft=null;$('search').value='';$('filter-cluster').value='all';persist();render();setStatus('Daten aus Datei geladen');
+  const newEvents=new Set(incoming.events.map(item=>item.id)),newClusters=new Set(incoming.clusters.map(item=>item.id));for(const item of data.events)if(!newEvents.has(item.id))window.SUDRecordDeletion?.('event',item.id);for(const item of data.clusters)if(!newClusters.has(item.id))window.SUDRecordDeletion?.('cluster',item.id);data=incoming;selectedId=null;editorDraft=null;$('search').value='';$('filter-cluster').value='all';persist();render();setStatus('Daten aus Datei geladen');
  }catch(err){alert('Import fehlgeschlagen: '+(err?.message||err));console.error(err)}
 });
 load();render();
