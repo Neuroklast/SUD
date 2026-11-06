@@ -178,7 +178,7 @@
         base: originalBase,
         data: startDocument
       });
-      if (!result.etag || !result.data) throw Error('Server hat keine bestätigte Datenversion zurückgegeben');
+      if (result.etag === undefined || !result.data) throw Error('Server hat keine bestätigte Datenversion zurückgegeben');
       const stored = snapshot(result.data);
       etag = result.etag;
       baseSnapshot = stored;
