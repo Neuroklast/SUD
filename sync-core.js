@@ -9,7 +9,9 @@
     const baseMap = new Map(base.map(item => [item.id, item]));
     const localMap = new Map(local.map(item => [item.id, item]));
     const remoteMap = new Map(remote.map(item => [item.id, item]));
-    const ids = new Set([...remoteMap.keys(), ...localMap.keys()]);
+    // Include the shared ancestor, even if *both* snapshots accidentally
+    // dropped the record. Only explicit tombstones can authorize removal.
+    const ids = new Set([...baseMap.keys(), ...remoteMap.keys(), ...localMap.keys()]);
     const merged = [];
 
     for (const id of ids) {
