@@ -180,6 +180,58 @@ test('GET returns 304 for the current state and 200 after a new change', async (
   assert.equal(changed.body.data.events[0].id, 'fresh');
 });
 
+test('incomplete historical operations never erase unrelated saved records', async () => {
+  const api = createHarness();
+  const baseline = document([event('one'), event('two')]);
+  api.seedLegacy(baseline);
+  const response = await api.request('PATCH', {
+    base: baseline,
+    data: document([event('one', 'edited')])
+  });
+  assert.equal(response.status, 200);
+  const latest = await api.request('GET');
+  assert.deepEqual(latest.body.data.events.map(e => e.id), ['one', 'two']);
+  assert.equal(latest.body.data.events[0].title, 'edited');
+});
+
+test('explicit user deletion removes only the confirmed ID', async () => {
+  const api = createHarness();
+  const baseline = document([event('one'), event('two')]);
+  api.seedLegacy(baseline);
+  const removed = await api.request('PATCH', {
+    base: baseline,
+    data: document([event('one')]),
+    deletions: { events: ['two'], clusters: [] }
+  });
+  assert.equal(removed.status, 200);
+  assert.deepEqual(removed.body.deleted.events, ['two']);
+  assert.deepEqual(removed.body.data.events.map(e => e.id), ['one']);
+  // A delayed, stale browser must not silently recreate a deleted ID.
+  const stale = await api.request('PATCH', {
+    base: baseline,
+    data: document([event('one', 'revised'), event('two', 'stale')])
+  });
+  assert.equal(stale.status, 200);
+  const final = await api.request('GET');
+  assert.deepEqual(final.body.data.events.map(e => e.id), ['one']);
+  assert.equal(final.body.data.events[0].title, 'revised');
+});
+
+test('restores entries omitted by a previous broken client snapshot', async () => {
+  const api = createHarness();
+  const baseline = document([event('a'), event('b'), event('c')]);
+  api.seedLegacy(baseline);
+  await api.request('PATCH', {
+    base: baseline, data: document([event('a')])
+  });
+  await api.request('PATCH', {
+    base: document([event('a')]), data: document([event('a', 'updated')])
+  });
+  const recovered = await api.request('GET');
+  assert.equal(recovered.status, 200);
+  assert.deepEqual(recovered.body.data.events.map(e => e.id), ['a', 'b', 'c']);
+});
+
 test('outdated PUT clients cannot overwrite the new journal', async () => {
   const api = createHarness();
   const forbidden = await api.request('PUT', { data: empty() });
