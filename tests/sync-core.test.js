@@ -58,3 +58,9 @@ test('removed clusters are stripped from event relationships', () => {
   assert.equal(merged.data.clusters.length, 0);
   assert.deepEqual(merged.data.events[0].clusterIds, []);
 });
+
+test('unchanged merged document is byte-for-byte equivalent to canonical input', () => {
+  const base = doc([event('a')]);
+  const next = mergeData(base, base, base).data;
+  assert.equal(JSON.stringify(next), JSON.stringify(base));
+});

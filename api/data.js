@@ -1,9 +1,14 @@
 import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import '../sync-core.js';
 import { json, readPasswordRecord, validSession, rejectCrossOrigin } from '../lib/auth.js';
 
+const { mergeData, equal } = globalThis.SUDSync;
 const PATH = 'sud/timeline-v2.json';
 const LIMIT = 750_000;
+const REQUEST_LIMIT = LIMIT * 2 + 80_000;
+const MAX_RETRIES = 7;
+const EMPTY = () => ({ version: 1, events: [], clusters: [] });
 
 function key() {
   const value = Buffer.from(process.env.SUD_DATA_KEY || '', 'base64');
@@ -25,18 +30,78 @@ function unpack(raw) {
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
 }
 function validData(value) {
-  return value && typeof value === 'object' &&
-    Number(value.version) === 1 && Array.isArray(value.events) && Array.isArray(value.clusters) &&
+  return value && typeof value === 'object' && Number(value.version) === 1 &&
+    Array.isArray(value.events) && Array.isArray(value.clusters) &&
     value.events.length <= 20_000 && value.clusters.length <= 1500;
+}
+function etagValid(etag) {
+  return etag === null || (typeof etag === 'string' &&
+    etag.length > 0 && etag.length <= 200 && /^[A-Za-z0-9"\\/_=-]+$/.test(etag));
+}
+function isConflict(error) {
+  return error instanceof BlobPreconditionFailedError ||
+    /already exists|precondition|condition not met|conflict/i.test(String(error?.message || ''));
+}
+function pause(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// All reads bypass Vercel Blob's 60-second overwritten-object CDN cache.
+// Otherwise even freshly merged conditional writes can loop on an old ETag.
+async function readDocument(ifNoneMatch) {
+  const file = await get(PATH, { access: 'private', useCache: false,
+    ...(ifNoneMatch ? { ifNoneMatch } : {}) });
+  if (!file || file.statusCode === 404) return { data: null, etag: null };
+  if (file.statusCode === 304) return { unchanged: true, etag: file.blob.etag };
+  if (file.statusCode !== 200 || !file.stream) {
+    throw Object.assign(new Error('Data unavailable'), { status: 502 });
+  }
+  const raw = await new Response(file.stream).text();
+  if (raw.length > LIMIT * 2) throw Object.assign(new Error('Data too large'), { status: 502 });
+  const data = unpack(raw);
+  if (!validData(data)) throw Object.assign(new Error('Invalid stored data'), { status: 502 });
+  return { data, etag: file.blob.etag };
+}
+async function writeDocument(value, etag) {
+  return put(PATH, pack(value), {
+    access: 'private', contentType: 'application/json', allowOverwrite: Boolean(etag),
+    ...(etag ? { ifMatch: etag } : {}), cacheControlMaxAge: 60
+  });
+}
+
+// Merge is done inside the API, not in repeated browser PUTs. A losing CAS
+// retries against an origin-fresh snapshot. Never overwrite without a matched ETag.
+async function mergeAndWrite(base, incoming) {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const cloud = await readDocument();
+    const merged = mergeData(base, incoming, cloud.data || EMPTY());
+    if (!validData(merged.data) || Buffer.byteLength(JSON.stringify(merged.data), 'utf8') > LIMIT) {
+      throw Object.assign(new Error('Merged document too large'), { status: 413 });
+    }
+    if (equal(merged.data, cloud.data || EMPTY())) {
+      return { data: cloud.data || EMPTY(), etag: cloud.etag,
+        conflictCount: merged.conflicts.length };
+    }
+    try {
+      const stored = await writeDocument(merged.data, cloud.etag);
+      return { data: merged.data, etag: stored.etag,
+        conflictCount: merged.conflicts.length };
+    } catch (error) {
+      if (!isConflict(error)) throw error;
+      // Another write arrived between read and PUT, or the upstream
+      // storage precondition is still stale. Back off rather than spin.
+      if (attempt + 1 === MAX_RETRIES) break;
+      await pause(Math.min(1000, 75 * (2 ** attempt)) + Math.round(Math.random() * 50));
+    }
+  }
+  throw Object.assign(new Error('Concurrent writes still in progress'), { status: 503 });
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'GET' && req.method !== 'PUT') {
-    res.setHeader('Allow', 'GET, PUT');
+  if (!['GET', 'PUT', 'PATCH'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, PUT, PATCH');
     return json(res, 405, { error: 'Nicht erlaubt' });
   }
-  if (req.method === 'PUT' && (rejectCrossOrigin(req) ||
-      !String(req.headers['content-type'] || '').startsWith('application/json'))) {
+  if (req.method !== 'GET' &&
+      (rejectCrossOrigin(req) || !String(req.headers['content-type'] || '').startsWith('application/json'))) {
     return json(res, 403, { error: 'Anfrage nicht erlaubt' });
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.SUD_SESSION_SECRET || !process.env.SUD_DATA_KEY) {
@@ -46,43 +111,51 @@ export default async function handler(req, res) {
     const record = await readPasswordRecord();
     if (!validSession(req, record)) return json(res, 401, { error: 'Anmeldung erforderlich' });
     if (req.method === 'GET') {
-      const knownEtag = req.headers['if-none-match'];
-      const file = await get(PATH, { access: 'private', useCache: false,
-        ...(typeof knownEtag === 'string' && knownEtag.length < 201 ? { ifNoneMatch: knownEtag } : {}) });
-      if (file?.statusCode === 304) {
+      const known = req.headers['if-none-match'];
+      const remote = await readDocument(typeof known === 'string' && etagValid(known) ? known : null);
+      if (remote.unchanged) {
         res.statusCode = 304;
         res.setHeader('Cache-Control', 'private, no-store, max-age=0');
-        res.setHeader('ETag', file.blob.etag);
+        res.setHeader('ETag', remote.etag);
         return res.end();
       }
-      if (!file || file.statusCode === 404) return json(res, 200, { data: null, etag: null });
-      if (file.statusCode !== 200 || !file.stream) return json(res, 502, { error: 'Daten nicht verfügbar' });
-      const raw = await new Response(file.stream).text();
-      if (raw.length > LIMIT * 2) return json(res, 502, { error: 'Datensatz zu groß' });
-      const data = unpack(raw);
-      if (!validData(data)) return json(res, 502, { error: 'Ungültiger Datensatz' });
-      res.setHeader('ETag', file.blob.etag);
-      return json(res, 200, { data, etag: file.blob.etag });
+      if (remote.etag) res.setHeader('ETag', remote.etag);
+      return json(res, 200, remote);
     }
-    if (Number(req.headers['content-length'] || 0) > LIMIT) return json(res, 413, { error: 'Datei zu groß' });
-    const input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-    if (!input || !validData(input.data)) return json(res, 400, { error: 'Ungültige Einträge' });
-    const serialized = JSON.stringify(input.data);
-    if (Buffer.byteLength(serialized, 'utf8') > LIMIT) return json(res, 413, { error: 'Datei zu groß' });
-    const etag = input.etag;
-    if (etag !== null && etag !== undefined &&
-        (typeof etag !== 'string' || etag.length > 200 || !/^[A-Za-z0-9"\/_=-]+$/.test(etag))) {
-      return json(res, 400, { error: 'Ungültige Datenversion' });
+
+    const limit = req.method === 'PATCH' ? REQUEST_LIMIT : LIMIT;
+    if (Number(req.headers['content-length'] || 0) > limit) {
+      return json(res, 413, { error: 'Datei zu groß' });
     }
-    const saved = await put(PATH, pack(input.data), {
-      access: 'private', contentType: 'application/json', allowOverwrite: Boolean(etag),
-      ...(etag ? { ifMatch: etag } : {}), cacheControlMaxAge: 60
-    });
-    return json(res, 200, { ok: true, etag: saved.etag });
+    let input;
+    try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
+    catch { return json(res, 400, { error: 'Ungültiges JSON' }); }
+    if (!input || !validData(input.data) ||
+        Buffer.byteLength(JSON.stringify(input), 'utf8') > limit) {
+      return json(res, 400, { error: 'Ungültige oder zu große Einträge' });
+    }
+    if (req.method === 'PATCH') {
+      if (!validData(input.base)) return json(res, 400, { error: 'Gemeinsame Ausgangsversion fehlt' });
+      const merged = await mergeAndWrite(input.base, input.data);
+      return json(res, 200, { ok: true, ...merged });
+    }
+
+    // Compatibility for already opened legacy tabs. ETags remain mandatory
+    // on overwrites, so an outdated tab cannot silently discard cloud changes.
+    if (!etagValid(input.etag ?? null)) return json(res, 400, { error: 'Ungültige Datenversion' });
+    try {
+      const saved = await writeDocument(input.data, input.etag ?? null);
+      return json(res, 200, { ok: true, etag: saved.etag });
+    } catch (error) {
+      if (isConflict(error)) return json(res, 409, { error: 'Die Daten wurden inzwischen geändert. Seite neu laden.' });
+      throw error;
+    }
   } catch (error) {
-    if (error instanceof BlobPreconditionFailedError ||
-        /already exists|precondition|condition not met|conflict/i.test(error.message || '')) {
-      return json(res, 409, { error: 'Die Daten wurden inzwischen auf einem anderen Gerät geändert.' });
+    if (typeof error.status === 'number') {
+      if (error.status === 503) res.setHeader('Retry-After', '3');
+      return json(res, error.status, { error: error.status === 503
+        ? 'Synchronisierung ist beschäftigt. Änderungen bleiben lokal erhalten.'
+        : error.status === 413 ? 'Datensatz zu groß' : 'Daten nicht verfügbar' });
     }
     console.error('Data operation failed:', error?.name || 'UnknownError');
     return json(res, 500, { error: 'Speichern gerade nicht möglich' });

@@ -46,16 +46,16 @@
     const clusters = mergeCollection(b.clusters, l.clusters, r.clusters,
       ['name', 'notes', 'color'], 'cluster', conflicts);
     const events = mergeCollection(b.events, l.events, r.events,
-      ['title', 'age', 'sud', 'notes', 'clusterIds'], 'event', conflicts);
+      ['age', 'sud', 'title', 'notes', 'clusterIds'], 'event', conflicts);
     const allowed = new Set(clusters.map(c => c.id));
     return {
       data: {
         version: 1,
-        clusters,
         events: events.map(ev => ({
           ...ev,
           clusterIds: ev.clusterIds.filter(id => allowed.has(id))
-        }))
+        })),
+        clusters
       },
       conflicts
     };
