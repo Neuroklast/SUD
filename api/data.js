@@ -66,8 +66,8 @@ async function loadPrivate(path) {
 }
 
 // A one-time, immutable, encrypted copy of the previous data file.
-// The old file is never deleted or overwritten. The copy is conditional on the
-// legacy ETag, so a late old-client write cannot corrupt the migration.
+// The old file is never deleted or overwritten. Direct PUTs are disabled
+// before migration so legacy clients cannot modify the baseline.
 async function ensureBaseline() {
   try {
     await head(BASE_PATH);
@@ -83,8 +83,8 @@ async function ensureBaseline() {
       if (!missing(error)) throw error;
     }
     if (legacy) {
-      await copy(LEGACY_PATH, BASE_PATH, {
-        access: 'private', allowOverwrite: false, ifMatch: legacy.etag
+      await copy(legacy.url, BASE_PATH, {
+        access: 'private', allowOverwrite: false
       });
     } else {
       await put(BASE_PATH, pack(EMPTY()), {
