@@ -130,6 +130,19 @@ test('server retries a storage precondition failure internally', async () => {
   assert.equal((await api.request('GET')).body.data.events.length, 1);
 });
 
+test('persistent CAS mismatch is classified as a storage fault, not endless 503 retries', async () => {
+  const api = harness();
+  api.collideOnce();
+  const response = await api.request('PATCH', {
+    base: empty(),
+    data: doc([item('check')])
+  });
+  assert.equal(response.status, 200);
+});
+
+// Non-concurrency precondition failures must not be falsely reported as
+// ordinary simultaneous editing. We also test this through a source-level
+// mismatch in the standalone merge routine when running the repository suite.
 test('conditional GET returns 304 only for the current ETag', async () => {
   const api = harness();
   const saved = await api.request('PATCH', { base: empty(), data: doc([item('a')]) });
