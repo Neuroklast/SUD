@@ -1,5 +1,5 @@
-/* Shared password access and automatic Vercel Blob sync.
-   There are no user-managed cloud tokens or encryption passwords. */
+/* Authenticated collaborative synchronization on encrypted private Vercel Blob.
+   Cloud is canonical. Cached changes are merged using optimistic ETags. */
 (() => {
   'use strict';
   if (location.protocol === 'file:') return;
@@ -14,18 +14,36 @@
   el('change-password').style.display = setupToken ? '' : 'none';
   if (setupToken) history.replaceState(null, '', location.pathname + location.search);
 
+  const sync = window.SUDSync;
+  if (!sync) {
+    setStatus('Synchronisierungsmodul fehlt. Bitte neu laden.', false);
+    return;
+  }
+
+  const BASE_KEY = STORAGE_KEY + '-cloud-base-v2';
+  const PENDING_KEY = STORAGE_KEY + '-pending-v2';
+  const BACKUP_KEY = STORAGE_KEY + '-pre-cloud-backup-v2';
+  const empty = () => ({ version: 1, events: [], clusters: [] });
+  const snapshot = value => normalize(JSON.parse(JSON.stringify(value)));
+  const status = (message, ok = true) => setStatus(message, ok);
+
   let configured = false;
   let loggedIn = false;
   let ready = false;
   let etag = null;
+  let baseSnapshot = null;
   let dirty = false;
   let revision = 0;
   let writing = false;
+  let refreshing = false;
   let autosaveTimer = null;
+  let pollTimer = null;
   let suppress = false;
   let changeMode = false;
+  let lastActivity = Date.now();
+  let lastConflictCount = 0;
+  const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('sud-cloud-refresh-v2') : null;
 
-  const status = (message, ok = true) => setStatus(message, ok);
   const show = (mode = 'login') => {
     changeMode = mode === 'change';
     screen.hidden = false;
@@ -42,17 +60,21 @@
     screen.hidden = true;
     document.body.classList.remove('locked');
     el('access-password').value = '';
-    status('Verbunden');
+    status('Verbinde mit der Cloud …');
   };
 
-  async function request(path, method = 'GET', payload = null) {
+  async function request(path, method = 'GET', payload = null, knownEtag = null) {
+    const headers = {};
+    if (payload !== null) headers['Content-Type'] = 'application/json';
+    if (method === 'GET' && knownEtag) headers['If-None-Match'] = knownEtag;
     const response = await fetch(path, {
       method,
       credentials: 'same-origin',
       cache: 'no-store',
-      headers: payload === null ? {} : { 'Content-Type': 'application/json' },
+      headers,
       body: payload === null ? undefined : JSON.stringify(payload)
     });
+    if (response.status === 304) return { unchanged: true, etag: knownEtag };
     const body = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(body.error || 'Verbindung fehlgeschlagen (' + response.status + ')');
@@ -60,6 +82,8 @@
       if (response.status === 401 && path === '/api/data') {
         loggedIn = false;
         ready = false;
+        clearTimeout(autosaveTimer);
+        clearTimeout(pollTimer);
         show();
       }
       throw error;
@@ -68,83 +92,227 @@
   }
 
   const originalPersist = persist;
+  function storeSyncState() {
+    try {
+      if (baseSnapshot) localStorage.setItem(BASE_KEY, JSON.stringify(baseSnapshot));
+      if (dirty) localStorage.setItem(PENDING_KEY, '1');
+      else localStorage.removeItem(PENDING_KEY);
+    } catch (error) {
+      status('Lokale Sicherung nicht möglich. Bitte JSON exportieren.', false);
+    }
+  }
+  function keepLegacyBackup(local) {
+    try {
+      if (!localStorage.getItem(BACKUP_KEY)) localStorage.setItem(BACKUP_KEY, JSON.stringify(local));
+    } catch (_) { /* Browser storage may be disabled. */ }
+  }
+
   persist = function () {
     originalPersist();
     if (suppress) return;
-    dirty = true;
     revision++;
+    dirty = true;
+    storeSyncState();
     if (loggedIn && ready) {
-      status('Änderungen werden gespeichert …');
+      status('Änderungen werden synchronisiert …');
       queueSave();
+    } else {
+      status('Lokal gespeichert. Verbindung zur Cloud ausstehend.', false);
     }
   };
-  function queueSave() {
-    if (!loggedIn || !ready) return;
+
+  function queueSave(delay = 650) {
+    if (!loggedIn || !ready || !dirty) return;
     clearTimeout(autosaveTimer);
-    autosaveTimer = setTimeout(save, 900);
+    autosaveTimer = setTimeout(save, delay);
   }
-  async function save() {
-    if (writing || !ready || !loggedIn || !dirty) return;
-    writing = true;
-    const current = revision;
+
+  // Remote updates never replace an unfinished event form.
+  function applyDocument(next, preserveDraft) {
+    const oldEvent = selectedId ? data.events.find(item => item.id === selectedId) : editorDraft;
+    const formValues = preserveDraft && typeof readEditorFields === 'function' ? readEditorFields() : null;
+    const focused = document.activeElement?.id;
+    data = next;
+    if (selectedId && !data.events.some(item => item.id === selectedId)) {
+      selectedId = null;
+      editorDraft = null;
+    }
+    suppress = true;
     try {
-      const result = await request('/api/data', 'PUT', { data: normalize(data), etag });
-      if (!result.etag) throw Error('Keine Datenversion zurückerhalten');
-      etag = result.etag;
-      dirty = current !== revision;
-      status(dirty ? 'Weitere Änderungen werden gespeichert …' : 'Gespeichert');
-    } catch (error) {
-      if (error.status === 409) {
-        ready = false;
-        status('Speicherkonflikt. Lokale Daten bleiben erhalten.', false);
-        alert('Die Daten wurden auf einem anderen Gerät geändert. Bitte deine lokalen Änderungen zuerst als JSON exportieren und dann neu laden.');
-      } else {
-        status('Cloud-Speicherung fehlgeschlagen. Lokale Daten sind vorhanden.', false);
+      originalPersist();
+      render();
+    } finally {
+      suppress = false;
+    }
+    if (formValues && !el('event-form').hidden && (!formValues.id || formValues.id === selectedId)) {
+      const changed = key => !oldEvent || !sync.equal(formValues[key], oldEvent[key]);
+      if (changed('title')) el('event-title').value = formValues.title;
+      if (changed('age')) el('event-age').value = String(formValues.age);
+      if (changed('sud')) el('event-sud').value = String(formValues.sud);
+      if (changed('notes')) el('event-notes').value = formValues.notes;
+      if (changed('clusterIds')) {
+        const chosen = new Set(formValues.clusterIds);
+        for (const input of el('event-cluster-checks').querySelectorAll('input')) {
+          input.checked = chosen.has(input.value);
+        }
       }
+    }
+    if (focused && el(focused) && document.activeElement?.id !== focused && !el(focused).hidden) {
+      el(focused).focus({ preventScroll: true });
+    }
+  }
+
+  // Each record is merged by ID and each changed property against the last
+  // confirmed cloud snapshot. Unrelated edits survive simultaneous saves.
+  async function save() {
+    if (writing || refreshing || !ready || !loggedIn || !dirty) return;
+    writing = true;
+    clearTimeout(autosaveTimer);
+    const startRevision = revision;
+    const startDocument = snapshot(data);
+    let working = startDocument;
+    let compareBase = baseSnapshot || empty();
+    let expected = etag;
+    try {
+      let saved = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        try {
+          saved = await request('/api/data', 'PUT', { data: working, etag: expected });
+          break;
+        } catch (error) {
+          if (error.status !== 409 || attempt === 5) throw error;
+          const remote = await request('/api/data');
+          const cloud = normalize(remote.data || empty());
+          const result = sync.mergeData(compareBase, working, cloud);
+          lastConflictCount += result.conflicts.length;
+          working = normalize(result.data);
+          compareBase = cloud;
+          expected = remote.etag;
+          if (sync.equal(working, cloud)) {
+            saved = { etag: remote.etag };
+            break;
+          }
+        }
+      }
+      if (!saved) throw new Error('Synchronisierung konnte nicht abgeschlossen werden');
+      baseSnapshot = snapshot(working);
+      etag = saved.etag;
+      const current = snapshot(data);
+      const next = revision === startRevision ? working :
+        normalize(sync.mergeData(startDocument, current, working).data);
+      applyDocument(next, revision !== startRevision || !sync.equal(current, next));
+      dirty = !sync.equal(next, baseSnapshot);
+      storeSyncState();
+      status(dirty ? 'Weitere Änderungen werden gespeichert …' :
+        lastConflictCount ? 'Synchronisiert. Gleichzeitig geänderte Felder: ' + lastConflictCount :
+          'Cloud synchronisiert', true);
+      lastConflictCount = 0;
+      channel?.postMessage({ type: 'updated' });
+    } catch (error) {
+      if (error.status === 401) return;
+      status(error.status === 409
+        ? 'Gleichzeitige Änderungen. Automatischer neuer Versuch …'
+        : 'Cloud nicht erreichbar. Änderungen bleiben lokal und werden erneut versucht.', false);
+      dirty = true;
+      storeSyncState();
+      queueSave(6000);
     } finally {
       writing = false;
-      if (dirty && ready && loggedIn && current !== revision) queueSave();
+      if (dirty && ready && loggedIn) queueSave(1000);
     }
   }
 
   async function loadCloud() {
     ready = false;
-    status('Lade Daten …');
+    status('Lade gemeinsamen Datenbestand …');
     const remote = await request('/api/data');
-    const hasLocal = data.events.length || data.clusters.length;
-    if (remote.data) {
-      const fromCloud = normalize(remote.data);
-      const different = JSON.stringify(normalize(data)) !== JSON.stringify(fromCloud);
-      if (hasLocal && different &&
-          !confirm('Dieses Gerät enthält andere Einträge als die Cloud. Cloud-Version übernehmen? Abbrechen behält die lokalen Daten, ohne die Cloud zu überschreiben.')) {
-        etag = remote.etag;
-        status('Lokale Daten behalten. Cloud-Synchronisierung angehalten.', false);
-        return;
-      }
-      suppress = true;
-      try {
-        data = fromCloud;
-        selectedId = null;
-        editorDraft = null;
-        originalPersist();
-        render();
-      } finally { suppress = false; }
+    const cloud = normalize(remote.data || empty());
+    const local = snapshot(data);
+    let previouslySynced = null;
+    let pending = dirty;
+    try {
+      const raw = localStorage.getItem(BASE_KEY);
+      if (raw) previouslySynced = normalize(JSON.parse(raw));
+      pending = pending || localStorage.getItem(PENDING_KEY) === '1';
+    } catch (_) { /* Continue from the cloud copy. */ }
+
+    let next = cloud;
+    if (pending && previouslySynced) {
+      const merged = sync.mergeData(previouslySynced, local, cloud);
+      next = normalize(merged.data);
+      lastConflictCount += merged.conflicts.length;
+    } else if (!remote.data && !previouslySynced && (local.events.length || local.clusters.length)) {
+      // Initial migration into an empty cloud, protected by conditional PUT.
+      next = local;
+    } else if (!sync.equal(local, cloud) && (local.events.length || local.clusters.length)) {
+      // Keep an older browser-only snapshot without silently restoring deleted cloud entries.
+      keepLegacyBackup(local);
+    }
+
+    etag = remote.etag;
+    baseSnapshot = snapshot(cloud);
+    applyDocument(next, false);
+    dirty = !sync.equal(next, cloud);
+    ready = true;
+    storeSyncState();
+    if (dirty) queueSave();
+    else status('Cloud synchronisiert');
+    schedulePoll();
+  }
+
+  async function refreshCloud() {
+    if (!loggedIn || !ready || refreshing || writing || !navigator.onLine) return;
+    refreshing = true;
+    try {
+      const remote = await request('/api/data', 'GET', null, etag);
+      if (remote.unchanged) return;
+      const cloud = normalize(remote.data || empty());
+      const current = snapshot(data);
+      const merged = dirty
+        ? sync.mergeData(baseSnapshot || empty(), current, cloud)
+        : { data: cloud, conflicts: [] };
+      lastConflictCount += merged.conflicts.length;
+      const next = normalize(merged.data);
       etag = remote.etag;
-      dirty = false;
-      ready = true;
-      status('Gespeichert');
-    } else {
-      etag = null;
-      ready = true;
-      if (hasLocal) {
-        dirty = true;
-        queueSave();
-      } else {
-        dirty = false;
-        status('Bereit');
-      }
+      baseSnapshot = snapshot(cloud);
+      applyDocument(next, true);
+      dirty = !sync.equal(next, cloud);
+      storeSyncState();
+      if (dirty) queueSave();
+      else status('Cloud synchronisiert');
+    } catch (error) {
+      if (error.status !== 401) status('Verbindung unterbrochen. Daten werden erneut abgeglichen.', false);
+    } finally {
+      refreshing = false;
     }
   }
+
+  function schedulePoll() {
+    clearTimeout(pollTimer);
+    if (!loggedIn || !ready) return;
+    const delay = document.visibilityState === 'hidden' ? 60000 :
+      Date.now() - lastActivity < 90000 ? 3000 : 12000;
+    pollTimer = setTimeout(async () => {
+      await refreshCloud();
+      schedulePoll();
+    }, delay);
+  }
+
+  document.addEventListener('pointerdown', () => { lastActivity = Date.now(); }, { passive: true });
+  document.addEventListener('keydown', () => { lastActivity = Date.now(); }, { passive: true });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      lastActivity = Date.now();
+      refreshCloud();
+    }
+    schedulePoll();
+  });
+  window.addEventListener('focus', () => { lastActivity = Date.now(); refreshCloud(); });
+  window.addEventListener('online', () => { refreshCloud(); if (dirty) queueSave(); });
+  channel?.addEventListener('message', event => {
+    if (event.data?.type === 'updated') refreshCloud();
+  });
+
   async function start() {
     try {
       const state = await request('/api/auth');
@@ -152,9 +320,7 @@
       if (state.authenticated) {
         unlock();
         await loadCloud();
-      } else {
-        show();
-      }
+      } else show();
     } catch (error) {
       show();
       el('access-message').textContent = error.message;
@@ -185,7 +351,6 @@
       }
     } catch (error) {
       el('access-message').textContent = error.message;
-      // Keep the error visible in the password form.
     } finally {
       el('access-submit').disabled = false;
       el('access-password').value = '';
@@ -203,6 +368,8 @@
     loggedIn = false;
     ready = false;
     configured = true;
+    clearTimeout(pollTimer);
+    clearTimeout(autosaveTimer);
     show();
   });
   el('save-cloud').addEventListener('click', async () => {
@@ -212,13 +379,16 @@
       catch (err) { status(err.message, false); }
       return;
     }
-    dirty = true;
+    if (!dirty) {
+      await refreshCloud();
+      return;
+    }
     await save();
   });
-  window.addEventListener('beforeunload', e => {
-    if (!dirty || !loggedIn || !ready) return;
-    e.preventDefault();
-    e.returnValue = '';
+  window.addEventListener('beforeunload', event => {
+    if (!dirty || !loggedIn) return;
+    event.preventDefault();
+    event.returnValue = '';
   });
 
   start();
