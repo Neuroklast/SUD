@@ -17,8 +17,22 @@
       const mine = localMap.get(id);
       const theirs = remoteMap.get(id);
       if (before) {
-        // Explicit local and remote deletions both win over outdated copies.
-        if (!mine || !theirs) continue;
+        // Missing IDs in a whole-document snapshot are NOT deletions.
+        // Only explicit deletion operations may remove records.
+        // Without this safeguard, an incomplete/stale tab permanently
+        // erased records from the shared timeline.
+        if (!mine && !theirs) {
+          merged.push(before);
+          continue;
+        }
+        if (!mine) {
+          merged.push(theirs);
+          continue;
+        }
+        if (!theirs) {
+          merged.push(mine);
+          continue;
+        }
         const next = { id };
         for (const field of fields) {
           const localChanged = !equal(mine[field], before[field]);
