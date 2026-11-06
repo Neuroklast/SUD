@@ -1,4 +1,4 @@
-import { get, put, BlobPreconditionFailedError } from '@vercel/blob';
+import { get, put, head, BlobPreconditionFailedError } from '@vercel/blob';
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
 import '../sync-core.js';
 import { json, readPasswordRecord, validSession, rejectCrossOrigin } from '../lib/auth.js';
@@ -67,9 +67,11 @@ async function writeDocument(value, etag) {
   });
 }
 
-// Merge is done inside the API, not in repeated browser PUTs. A losing CAS
-// retries against an origin-fresh snapshot. Never overwrite without a matched ETag.
+// Conditional writes are safe only when the ETag we read matches Blob's
+// current metadata. A precondition failure against the same current ETag is
+// not evidence of a competing editor and must not trigger endless retries.
 async function mergeAndWrite(base, incoming) {
+  let unchangedEtagFailures = 0;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const cloud = await readDocument();
     const merged = mergeData(base, incoming, cloud.data || EMPTY());
@@ -80,19 +82,50 @@ async function mergeAndWrite(base, incoming) {
       return { data: cloud.data || EMPTY(), etag: cloud.etag,
         conflictCount: merged.conflicts.length };
     }
+
     try {
       const stored = await writeDocument(merged.data, cloud.etag);
       return { data: merged.data, etag: stored.etag,
         conflictCount: merged.conflicts.length };
     } catch (error) {
       if (!isConflict(error)) throw error;
-      // Another write arrived between read and PUT, or the upstream
-      // storage precondition is still stale. Back off rather than spin.
-      if (attempt + 1 === MAX_RETRIES) break;
-      await pause(Math.min(1000, 75 * (2 ** attempt)) + Math.round(Math.random() * 50));
+      let latest;
+      try {
+        // head() reads the current metadata without any document content.
+        latest = await head(PATH);
+      } catch (metadataError) {
+        console.warn('SUD storage metadata check failed', metadataError?.name || 'Unknown');
+        throw Object.assign(new Error('Storage metadata unavailable'), { status: 502 });
+      }
+      const sameEtag = Boolean(cloud.etag && latest?.etag === cloud.etag);
+      if (sameEtag) unchangedEtagFailures++;
+      else unchangedEtagFailures = 0;
+      if (unchangedEtagFailures >= 2) {
+        console.error('SUD conditional write rejected matching current ETag', {
+          code: 'BLOB_CAS_INCONSISTENT',
+          attempts: attempt + 1,
+          reason: error?.name || 'PreconditionFailed'
+        });
+        throw Object.assign(new Error('Storage precondition inconsistent'), {
+          status: 502,
+          code: 'BLOB_CAS_INCONSISTENT'
+        });
+      }
+      if (attempt + 1 === MAX_RETRIES) {
+        console.warn('SUD concurrent writes exhausted retry budget', {
+          code: 'BLOB_WRITE_CONTENTION',
+          attempts: MAX_RETRIES,
+          latestDiffers: Boolean(cloud.etag !== latest?.etag)
+        });
+        break;
+      }
+      await pause(Math.min(1500, 120 * (2 ** attempt)) + Math.round(Math.random() * 250));
     }
   }
-  throw Object.assign(new Error('Concurrent writes still in progress'), { status: 503 });
+  throw Object.assign(new Error('Concurrent writes still in progress'), {
+    status: 503,
+    code: 'BLOB_WRITE_CONTENTION'
+  });
 }
 
 export default async function handler(req, res) {
@@ -152,10 +185,15 @@ export default async function handler(req, res) {
     }
   } catch (error) {
     if (typeof error.status === 'number') {
-      if (error.status === 503) res.setHeader('Retry-After', '3');
-      return json(res, error.status, { error: error.status === 503
-        ? 'Synchronisierung ist beschäftigt. Änderungen bleiben lokal erhalten.'
-        : error.status === 413 ? 'Datensatz zu groß' : 'Daten nicht verfügbar' });
+      if (error.status === 503 || error.status === 502) res.setHeader('Retry-After', '15');
+      return json(res, error.status, {
+        code: error.code || (error.status === 503 ? 'STORAGE_UNAVAILABLE' : 'STORAGE_ERROR'),
+        error: error.status === 503
+          ? 'Gleichzeitige Änderungen blockieren derzeit die Speicherung. Lokale Änderungen bleiben erhalten.'
+          : error.status === 502
+            ? 'Vercel Blob hat die aktuelle Datenversion abgelehnt. Lokale Änderungen bleiben erhalten.'
+            : error.status === 413 ? 'Datensatz zu groß' : 'Daten nicht verfügbar'
+      });
     }
     console.error('Data operation failed:', error?.name || 'UnknownError');
     return json(res, 500, { error: 'Speichern gerade nicht möglich' });
