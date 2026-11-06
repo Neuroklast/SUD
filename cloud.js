@@ -162,64 +162,51 @@
     }
   }
 
-  // Each record is merged by ID and each changed property against the last
-  // confirmed cloud snapshot. Unrelated edits survive simultaneous saves.
+  // API merges against the latest confirmed cloud snapshot and handles CAS
+  // conflicts internally. One browser PATCH replaces the old PUT/409 storm.
+  let retryDelay = 3000;
   async function save() {
     if (writing || refreshing || !ready || !loggedIn || !dirty) return;
     writing = true;
-    let failed = false;
     clearTimeout(autosaveTimer);
     const startRevision = revision;
     const startDocument = snapshot(data);
-    let working = startDocument;
-    let compareBase = baseSnapshot || empty();
-    let expected = etag;
+    const originalBase = snapshot(baseSnapshot || empty());
+    let failed = false;
     try {
-      let saved = null;
-      for (let attempt = 0; attempt < 6; attempt++) {
-        try {
-          saved = await request('/api/data', 'PUT', { data: working, etag: expected });
-          break;
-        } catch (error) {
-          if (error.status !== 409 || attempt === 5) throw error;
-          const remote = await request('/api/data');
-          const cloud = normalize(remote.data || empty());
-          const result = sync.mergeData(compareBase, working, cloud);
-          lastConflictCount += result.conflicts.length;
-          working = normalize(result.data);
-          compareBase = cloud;
-          expected = remote.etag;
-          if (sync.equal(working, cloud)) {
-            saved = { etag: remote.etag };
-            break;
-          }
-        }
-      }
-      if (!saved) throw new Error('Synchronisierung konnte nicht abgeschlossen werden');
-      baseSnapshot = snapshot(working);
-      etag = saved.etag;
+      const result = await request('/api/data', 'PATCH', {
+        base: originalBase,
+        data: startDocument
+      });
+      if (!result.etag || !result.data) throw Error('Server hat keine bestätigte Datenversion zurückgegeben');
+      const stored = snapshot(result.data);
+      etag = result.etag;
+      baseSnapshot = stored;
+      // Preserve edits made after the request started.
       const current = snapshot(data);
-      const next = revision === startRevision ? working :
-        normalize(sync.mergeData(startDocument, current, working).data);
+      const next = revision === startRevision ? stored :
+        snapshot(sync.mergeData(startDocument, current, stored).data);
       applyDocument(next, true);
-      dirty = !sync.equal(next, baseSnapshot);
+      dirty = !sync.equal(next, stored);
       storeSyncState();
+      retryDelay = 3000;
       status(dirty ? 'Weitere Änderungen werden gespeichert …' :
-        lastConflictCount ? 'Synchronisiert. Gleichzeitig geänderte Felder: ' + lastConflictCount :
-          'Cloud synchronisiert', true);
-      lastConflictCount = 0;
+        result.conflictCount
+          ? 'Synchronisiert. ' + result.conflictCount + ' gleichzeitig bearbeitete Felder zusammengeführt.'
+          : 'Cloud synchronisiert');
       channel?.postMessage({ type: 'updated' });
     } catch (error) {
       if (error.status === 401) return;
       failed = true;
-      status(error.status === 409
-        ? 'Gleichzeitige Änderungen. Automatischer neuer Versuch …'
-        : 'Cloud nicht erreichbar. Änderungen bleiben lokal und werden erneut versucht.', false);
       dirty = true;
       storeSyncState();
+      status('Speichern ausstehend. Verbindung wird automatisch erneut versucht.', false);
     } finally {
       writing = false;
-      if (dirty && ready && loggedIn) queueSave(failed ? 6000 : 1000);
+      if (dirty && ready && loggedIn && navigator.onLine) {
+        queueSave(failed ? retryDelay : 900);
+        if (failed) retryDelay = Math.min(retryDelay * 2, 60000);
+      }
     }
   }
 
