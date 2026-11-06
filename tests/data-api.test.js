@@ -28,7 +28,7 @@ function createHarness() {
   async function head(pathname) {
     const found = files.get(pathname);
     if (!found) throw new BlobNotFoundError('Blob not found');
-    return { pathname, etag: found.etag };
+    return { pathname, etag: found.etag, url: 'https://store.private.blob.vercel-storage.com/' + pathname };
   }
   async function get(pathname, options) {
     assert.equal(options.access, 'private');
@@ -48,10 +48,13 @@ function createHarness() {
     putCount++;
     return { etag: files.get(pathname).etag };
   }
-  async function copy(source, destination, options) {
+  async function copy(sourceUrl, destination, options) {
+    assert.equal(options.access, 'private');
+    assert.equal(options.allowOverwrite, false);
     if (files.has(destination)) throw new BlobPreconditionFailedError('already exists');
+    const source = new URL(sourceUrl).pathname.slice(1);
     const found = files.get(source);
-    if (!found || options.ifMatch !== found.etag) {
+    if (!found) {
       throw new BlobPreconditionFailedError('precondition');
     }
     files.set(destination, file(destination, found.body));
