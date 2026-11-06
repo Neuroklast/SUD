@@ -51,11 +51,11 @@
     return {
       data: {
         version: 1,
-        clusters,
         events: events.map(ev => ({
           ...ev,
           clusterIds: ev.clusterIds.filter(id => allowed.has(id))
-        }))
+        })),
+        clusters
       },
       conflicts
     };
