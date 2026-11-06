@@ -2,156 +2,187 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createHash, createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 
-const item = (id, title = id, notes = '') =>
+const event = (id, title = id, notes = '') =>
   ({ id, age: 10, sud: 5, title, notes, clusterIds: [] });
-const doc = (events = [], clusters = []) => ({ version: 1, events, clusters });
-const empty = () => doc();
+const document = (events = [], clusters = []) => ({ version: 1, events, clusters });
+const empty = () => document();
 
-function harness() {
-  const source = readFileSync(new URL('../api/data.js', import.meta.url), 'utf8')
+function createHarness() {
+  const serverSource = readFileSync(new URL('../api/data.js', import.meta.url), 'utf8')
     .replace(/^import .*?;\s*$/gm, '')
     .replace('export default async function handler', 'async function handler');
-  const sync = readFileSync(new URL('../sync-core.js', import.meta.url), 'utf8');
-  let stored = null;
-  let sequence = 0;
-  let failNextWrite = false;
-  let rejectAllWrites = false;
+  const coreSource = readFileSync(new URL('../sync-core.js', import.meta.url), 'utf8');
+  const files = new Map();
+  let counter = 0;
+  let putCount = 0;
+  let baselineCopyCount = 0;
+  class BlobNotFoundError extends Error {}
   class BlobPreconditionFailedError extends Error {}
 
-  async function get(path, options) {
-    assert.equal(path, 'sud/timeline-v2.json');
+  const file = (pathname, body) => ({
+    pathname, body, etag: '"' + ++counter + '"',
+    uploadedAt: new Date(Date.now() + counter)
+  });
+  async function head(pathname) {
+    const found = files.get(pathname);
+    if (!found) throw new BlobNotFoundError('Blob not found');
+    return { pathname, etag: found.etag, url: 'https://store.private.blob.vercel-storage.com/' + pathname };
+  }
+  async function get(pathname, options) {
+    assert.equal(options.access, 'private');
     assert.equal(options.useCache, false);
-    if (!stored) return null;
-    if (stored.etag === options.ifNoneMatch) {
-      return { statusCode: 304, stream: null, blob: { etag: stored.etag } };
+    const found = files.get(pathname);
+    if (!found) return null;
+    if (options.ifNoneMatch === found.etag) {
+      return { statusCode: 304, stream: null, blob: { etag: found.etag } };
     }
-    return { statusCode: 200, stream: new Response(stored.text).body,
-      blob: { etag: stored.etag } };
+    return { statusCode: 200, stream: new Response(found.body).body,
+      blob: { etag: found.etag } };
   }
-  async function head(path) {
-    assert.equal(path, 'sud/timeline-v2.json');
-    return stored ? { etag: stored.etag } : null;
+  async function put(pathname, body, options) {
+    assert.equal(options.access, 'private');
+    if (files.has(pathname)) throw new BlobPreconditionFailedError('already exists');
+    files.set(pathname, file(pathname, body));
+    putCount++;
+    return { etag: files.get(pathname).etag };
   }
-  async function put(path, payload, options) {
-    assert.equal(path, 'sud/timeline-v2.json');
-    if (failNextWrite || rejectAllWrites) {
-      failNextWrite = false;
-      throw new BlobPreconditionFailedError('precondition failed');
+  async function copy(sourceUrl, destination, options) {
+    assert.equal(options.access, 'private');
+    assert.equal(options.allowOverwrite, false);
+    if (files.has(destination)) throw new BlobPreconditionFailedError('already exists');
+    const source = new URL(sourceUrl).pathname.slice(1);
+    const found = files.get(source);
+    if (!found) {
+      throw new BlobPreconditionFailedError('precondition');
     }
-    if (stored && options.ifMatch !== stored.etag) {
-      throw new BlobPreconditionFailedError('precondition failed');
-    }
-    if (stored && !options.allowOverwrite) {
-      throw new BlobPreconditionFailedError('already exists');
-    }
-    if (!stored && options.ifMatch) {
-      throw new BlobPreconditionFailedError('precondition failed');
-    }
-    stored = { text: payload, etag: '"' + (++sequence).toString(16) + '"' };
-    return { etag: stored.etag };
+    files.set(destination, file(destination, found.body));
+    baselineCopyCount++;
+    return { etag: files.get(destination).etag };
+  }
+  async function list({ prefix, cursor, limit }) {
+    const values = [...files.values()].filter(value => value.pathname.startsWith(prefix))
+      .sort((a, b) => a.pathname.localeCompare(b.pathname));
+    const offset = cursor ? Number(cursor) : 0;
+    const chunk = values.slice(offset, offset + limit);
+    return { blobs: chunk.map(({ pathname, etag, uploadedAt }) => ({
+      pathname, etag, uploadedAt
+    })), hasMore: offset + limit < values.length,
+    cursor: offset + limit < values.length ? String(offset + limit) : undefined };
   }
   const context = {
-    Buffer, Response, setTimeout, randomBytes, createCipheriv, createDecipheriv,
-    get, put, head, BlobPreconditionFailedError,
+    Buffer, Response, setTimeout, randomBytes, createHash, createCipheriv,
+    createDecipheriv, head, get, put, copy, list,
+    BlobNotFoundError, BlobPreconditionFailedError,
     process: { env: {
       BLOB_READ_WRITE_TOKEN: 'test',
       SUD_SESSION_SECRET: 'test-secret',
-      SUD_DATA_KEY: Buffer.alloc(32, 7).toString('base64')
+      SUD_DATA_KEY: Buffer.alloc(32, 5).toString('base64')
     } },
     readPasswordRecord: async () => ({ version: 'test' }),
     validSession: () => true, rejectCrossOrigin: () => false,
-    json(res, code, payload) { res.statusCode = code; res.end(JSON.stringify(payload)); }
+    json(res, status, body) {
+      res.statusCode = status;
+      res.end(JSON.stringify(body));
+    }
   };
-  runInNewContext(sync, context);
-  runInNewContext(source + '\nglobalThis.serverHandler = handler;', context);
-
-  async function request(method, body = null, headers = {}) {
+  runInNewContext(coreSource, context);
+  runInNewContext(serverSource + '\nglobalThis.api = handler; globalThis.encrypt = pack;', context);
+  async function request(method, body, headers = {}) {
     const req = { method, body, headers: {
-      origin: 'https://sud-livid.vercel.app',
-      'content-type': 'application/json', ...headers
+      'content-type': 'application/json', origin: 'https://sud-livid.vercel.app', ...headers
     } };
-    const res = {
-      statusCode: 200,
-      headers: {},
-      setHeader(name, value) { this.headers[name] = value; },
-      end(value = '') { this.value = value; }
+    const res = { statusCode: 200, headers: {},
+      setHeader(key, value) { this.headers[key] = value; },
+      end(value = '') { this.result = value; }
     };
-    await context.serverHandler(req, res);
-    return { status: res.statusCode, body: res.value ? JSON.parse(res.value) : null,
+    await context.api(req, res);
+    return { status: res.statusCode,
+      body: res.result ? JSON.parse(res.result) : null,
       headers: res.headers };
   }
-  return { request, get writes() { return sequence; },
-    collideOnce() { failNextWrite = true; },
-    rejectEveryWrite() { rejectAllWrites = true; } };
+  return {
+    request,
+    seedLegacy(data) { files.set('sud/timeline-v2.json',
+      file('sud/timeline-v2.json', context.encrypt(data))); },
+    get changeCount() { return [...files.keys()]
+      .filter(name => name.startsWith('sud/sync-v3/changes/')).length; },
+    get copyCount() { return baselineCopyCount; },
+    get puts() { return putCount; },
+    hasFile(name) { return files.has(name); }
+  };
 }
 
-test('server merges independently edited events without returning a browser 409', async () => {
-  const api = harness();
-  const original = doc([item('a'), item('b')]);
-  assert.equal((await api.request('PATCH', { base: empty(), data: original })).status, 200);
-  const left = doc([item('a', 'from A'), item('b')]);
-  const right = doc([item('a'), item('b', 'from B')]);
+test('first read migrates existing encrypted data once, without changing the original', async () => {
+  const api = createHarness();
+  const original = document([event('one', 'Original', 'Existing private note')]);
+  api.seedLegacy(original);
+  const first = await api.request('GET');
+  const second = await api.request('GET');
+  assert.equal(first.status, 200);
+  assert.equal(second.body.data.events[0].notes, 'Existing private note');
+  assert.equal(api.copyCount, 1);
+  assert.equal(api.changeCount, 0);
+  assert.equal(api.hasFile('sud/timeline-v2.json'), true);
+  assert.equal(api.hasFile('sud/sync-v3/baseline.json'), true);
+});
+
+test('independent parallel edits both persist as immutable operations', async () => {
+  const api = createHarness();
+  const base = document([event('a'), event('b')]);
+  api.seedLegacy(base);
+  await api.request('GET');
   const [a, b] = await Promise.all([
-    api.request('PATCH', { base: original, data: left }),
-    api.request('PATCH', { base: original, data: right })
+    api.request('PATCH', { base, data: document([event('a', 'left'), event('b')]) }),
+    api.request('PATCH', { base, data: document([event('a'), event('b', 'right')]) })
   ]);
   assert.equal(a.status, 200);
   assert.equal(b.status, 200);
   const latest = await api.request('GET');
-  assert.deepEqual(latest.body.data.events.map(e => e.title), ['from A', 'from B']);
+  assert.deepEqual(latest.body.data.events.map(e => e.title), ['left', 'right']);
+  assert.equal(api.changeCount, 2);
 });
 
-test('same event merges independent fields; replay does not create extra revisions', async () => {
-  const api = harness();
-  const original = doc([item('a')]);
-  await api.request('PATCH', { base: empty(), data: original });
-  const first = await api.request('PATCH',
-    { base: original, data: doc([item('a', 'title')]) });
-  const second = await api.request('PATCH',
-    { base: original, data: doc([item('a', 'a', 'notes')]) });
+test('changes to different fields of the same event merge without losing data', async () => {
+  const api = createHarness();
+  const base = document([event('a')]);
+  api.seedLegacy(base);
+  const title = document([event('a', 'Edited')]);
+  const note = document([event('a', 'a', 'Written remotely')]);
+  await api.request('PATCH', { base, data: title });
+  await api.request('PATCH', { base, data: note });
+  const state = await api.request('GET');
+  assert.equal(state.body.data.events[0].title, 'Edited');
+  assert.equal(state.body.data.events[0].notes, 'Written remotely');
+});
+
+test('retry of the same PATCH is idempotent', async () => {
+  const api = createHarness();
+  const base = empty();
+  const update = document([event('x')]);
+  const first = await api.request('PATCH', { base, data: update });
+  const again = await api.request('PATCH', { base, data: update });
   assert.equal(first.status, 200);
-  assert.equal(second.status, 200);
-  const version = api.writes;
-  const replay = await api.request('PATCH',
-    { base: original, data: doc([item('a', 'a', 'notes')]) });
-  assert.equal(replay.status, 200);
-  assert.equal(api.writes, version);
-  const latest = await api.request('GET');
-  assert.equal(latest.body.data.events[0].title, 'title');
-  assert.equal(latest.body.data.events[0].notes, 'notes');
+  assert.equal(again.status, 200);
+  assert.equal(api.changeCount, 1);
 });
 
-test('server retries a storage precondition failure internally', async () => {
-  const api = harness();
-  api.collideOnce();
-  const response = await api.request('PATCH',
-    { base: empty(), data: doc([item('added')]) });
-  assert.equal(response.status, 200);
-  assert.equal((await api.request('GET')).body.data.events.length, 1);
+test('GET returns 304 for the current state and 200 after a new change', async () => {
+  const api = createHarness();
+  const base = empty();
+  const first = await api.request('GET');
+  const unchanged = await api.request('GET', null, { 'if-none-match': first.body.etag });
+  assert.equal(unchanged.status, 304);
+  await api.request('PATCH', { base, data: document([event('fresh')]) });
+  const changed = await api.request('GET', null, { 'if-none-match': first.body.etag });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.data.events[0].id, 'fresh');
 });
 
-test('permanent CAS mismatch has a bounded 502 error instead of repeated 503s', async () => {
-  const api = harness();
-  api.rejectEveryWrite();
-  const response = await api.request('PATCH', {
-    base: empty(),
-    data: doc([item('check')])
-  });
-  assert.equal(response.status, 502);
-  assert.equal(response.body.code, 'BLOB_CAS_INCONSISTENT');
-  assert.equal(api.writes, 0);
-});
-
-test('conditional GET returns 304 only for the current ETag', async () => {
-  const api = harness();
-  const saved = await api.request('PATCH', { base: empty(), data: doc([item('a')]) });
-  assert.equal((await api.request('GET', null, { 'if-none-match': saved.body.etag })).status, 304);
-  const altered = await api.request('PATCH',
-    { base: doc([item('a')]), data: doc([item('a', 'changed')]) });
-  assert.equal(altered.status, 200);
-  const fresh = await api.request('GET', null, { 'if-none-match': saved.body.etag });
-  assert.equal(fresh.status, 200);
-  assert.equal(fresh.body.data.events[0].title, 'changed');
+test('outdated PUT clients cannot overwrite the new journal', async () => {
+  const api = createHarness();
+  const forbidden = await api.request('PUT', { data: empty() });
+  assert.equal(forbidden.status, 426);
+  assert.equal(forbidden.body.code, 'UPDATE_REQUIRED');
 });

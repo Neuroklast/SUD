@@ -1,207 +1,248 @@
-import { get, put, head, BlobPreconditionFailedError } from '@vercel/blob';
-import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { get, put, copy, head, list, BlobNotFoundError, BlobPreconditionFailedError } from '@vercel/blob';
+import { randomBytes, createHash, createCipheriv, createDecipheriv } from 'node:crypto';
 import '../sync-core.js';
 import { json, readPasswordRecord, validSession, rejectCrossOrigin } from '../lib/auth.js';
 
 const { mergeData, equal } = globalThis.SUDSync;
-const PATH = 'sud/timeline-v2.json';
+const LEGACY_PATH = 'sud/timeline-v2.json';
+const BASE_PATH = 'sud/sync-v3/baseline.json';
+const CHANGES_PREFIX = 'sud/sync-v3/changes/';
 const LIMIT = 750_000;
 const REQUEST_LIMIT = LIMIT * 2 + 80_000;
-const MAX_RETRIES = 7;
+const MAX_OPERATIONS = 10_000;
 const EMPTY = () => ({ version: 1, events: [], clusters: [] });
+const operationCache = new Map(); // Immutable records only; an optimization, not a correctness dependency.
+let cachedBase = null;
 
-function key() {
+function dataKey() {
   const value = Buffer.from(process.env.SUD_DATA_KEY || '', 'base64');
   if (value.length !== 32) throw new Error('Invalid data encryption key');
   return value;
 }
 function pack(data) {
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key(), iv);
+  const cipher = createCipheriv('aes-256-gcm', dataKey(), iv);
   const ciphertext = Buffer.concat([cipher.update(JSON.stringify(data), 'utf8'), cipher.final()]);
-  return JSON.stringify({ format: 'sud-storage-v2', iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'), ciphertext: ciphertext.toString('base64') });
+  return JSON.stringify({
+    format: 'sud-storage-v2',
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+    ciphertext: ciphertext.toString('base64')
+  });
 }
 function unpack(raw) {
   const envelope = JSON.parse(raw);
   if (envelope.format !== 'sud-storage-v2') throw new Error('Unsupported storage format');
-  const decipher = createDecipheriv('aes-256-gcm', key(), Buffer.from(envelope.iv, 'base64'));
+  const decipher = createDecipheriv('aes-256-gcm', dataKey(), Buffer.from(envelope.iv, 'base64'));
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
-  return JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()]).toString('utf8'));
+  return JSON.parse(Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
+    decipher.final()
+  ]).toString('utf8'));
 }
 function validData(value) {
   return value && typeof value === 'object' && Number(value.version) === 1 &&
     Array.isArray(value.events) && Array.isArray(value.clusters) &&
     value.events.length <= 20_000 && value.clusters.length <= 1500;
 }
-function etagValid(etag) {
-  return etag === null || (typeof etag === 'string' &&
-    etag.length > 0 && etag.length <= 200 && /^[A-Za-z0-9"\\/_=-]+$/.test(etag));
+function storageError(code, message, status = 503) {
+  return Object.assign(new Error(message), { code, status });
 }
-function isConflict(error) {
+function missing(error) {
+  return error instanceof BlobNotFoundError || error?.name === 'BlobNotFoundError';
+}
+function alreadyExists(error) {
   return error instanceof BlobPreconditionFailedError ||
-    /already exists|precondition|condition not met|conflict/i.test(String(error?.message || ''));
+    /already exists|precondition|condition not met|conflict/i.test(error?.message || '');
 }
-function pause(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-// All reads bypass Vercel Blob's 60-second overwritten-object CDN cache.
-// Otherwise even freshly merged conditional writes can loop on an old ETag.
-async function readDocument(ifNoneMatch) {
-  const file = await get(PATH, { access: 'private', useCache: false,
-    ...(ifNoneMatch ? { ifNoneMatch } : {}) });
-  if (!file || file.statusCode === 404) return { data: null, etag: null };
-  if (file.statusCode === 304) return { unchanged: true, etag: file.blob.etag };
-  if (file.statusCode !== 200 || !file.stream) {
-    throw Object.assign(new Error('Data unavailable'), { status: 502 });
+async function loadPrivate(path) {
+  const result = await get(path, { access: 'private', useCache: false });
+  if (!result || result.statusCode === 404 || !result.stream) {
+    throw storageError('STORED_FILE_UNAVAILABLE', 'Private document is missing');
   }
-  const raw = await new Response(file.stream).text();
-  if (raw.length > LIMIT * 2) throw Object.assign(new Error('Data too large'), { status: 502 });
-  const data = unpack(raw);
-  if (!validData(data)) throw Object.assign(new Error('Invalid stored data'), { status: 502 });
-  return { data, etag: file.blob.etag };
-}
-async function writeDocument(value, etag) {
-  return put(PATH, pack(value), {
-    access: 'private', contentType: 'application/json', allowOverwrite: Boolean(etag),
-    ...(etag ? { ifMatch: etag } : {}), cacheControlMaxAge: 60
-  });
+  const raw = await new Response(result.stream).text();
+  if (raw.length > REQUEST_LIMIT * 2) throw storageError('STORED_FILE_TOO_LARGE', 'Storage item too large', 413);
+  return { data: unpack(raw), etag: result.blob.etag };
 }
 
-// Conditional writes are safe only when the ETag we read matches Blob's
-// current metadata. A precondition failure against the same current ETag is
-// not evidence of a competing editor and must not trigger endless retries.
-async function mergeAndWrite(base, incoming) {
-  let unchangedEtagFailures = 0;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const cloud = await readDocument();
-    const merged = mergeData(base, incoming, cloud.data || EMPTY());
-    if (!validData(merged.data) || Buffer.byteLength(JSON.stringify(merged.data), 'utf8') > LIMIT) {
-      throw Object.assign(new Error('Merged document too large'), { status: 413 });
-    }
-    if (equal(merged.data, cloud.data || EMPTY())) {
-      return { data: cloud.data || EMPTY(), etag: cloud.etag,
-        conflictCount: merged.conflicts.length };
-    }
-
+// A one-time, immutable, encrypted copy of the previous data file.
+// The old file is never deleted or overwritten. Direct PUTs are disabled
+// before migration so legacy clients cannot modify the baseline.
+async function ensureBaseline() {
+  try {
+    await head(BASE_PATH);
+    return;
+  } catch (error) {
+    if (!missing(error)) throw error;
+  }
+  try {
+    let legacy;
     try {
-      const stored = await writeDocument(merged.data, cloud.etag);
-      return { data: merged.data, etag: stored.etag,
-        conflictCount: merged.conflicts.length };
+      legacy = await head(LEGACY_PATH);
     } catch (error) {
-      if (!isConflict(error)) throw error;
-      let latest;
-      try {
-        // head() reads the current metadata without any document content.
-        latest = await head(PATH);
-      } catch (metadataError) {
-        // A first upload has no metadata yet; a failed create with no object
-        // is not a competing editor and should not loop indefinitely.
-        if (metadataError?.name === 'BlobNotFoundError') latest = null;
-        else {
-          console.warn('SUD storage metadata check failed', metadataError?.name || 'Unknown');
-          throw Object.assign(new Error('Storage metadata unavailable'), { status: 502 });
-        }
-      }
-      const sameEtag = latest?.etag === cloud.etag ||
-        (cloud.etag === null && latest === null);
-      if (sameEtag) unchangedEtagFailures++;
-      else unchangedEtagFailures = 0;
-      if (unchangedEtagFailures >= 2) {
-        console.error('SUD conditional write rejected matching current ETag', {
-          code: 'BLOB_CAS_INCONSISTENT',
-          attempts: attempt + 1,
-          reason: error?.name || 'PreconditionFailed'
-        });
-        throw Object.assign(new Error('Storage precondition inconsistent'), {
-          status: 502,
-          code: 'BLOB_CAS_INCONSISTENT'
-        });
-      }
-      if (attempt + 1 === MAX_RETRIES) {
-        console.warn('SUD concurrent writes exhausted retry budget', {
-          code: 'BLOB_WRITE_CONTENTION',
-          attempts: MAX_RETRIES,
-          latestDiffers: Boolean(cloud.etag !== latest?.etag)
-        });
-        break;
-      }
-      await pause(Math.min(1500, 120 * (2 ** attempt)) + Math.round(Math.random() * 250));
+      if (!missing(error)) throw error;
+    }
+    if (legacy) {
+      await copy(legacy.url, BASE_PATH, {
+        access: 'private', allowOverwrite: false
+      });
+    } else {
+      await put(BASE_PATH, pack(EMPTY()), {
+        access: 'private', allowOverwrite: false, contentType: 'application/json'
+      });
+    }
+  } catch (error) {
+    // Concurrent first visits may have initialized the same immutable base.
+    try { await head(BASE_PATH); return; }
+    catch (verifyError) {
+      if (!missing(verifyError)) throw verifyError;
+      if (alreadyExists(error)) throw storageError('BASELINE_INITIALIZATION_RETRY', 'Retry migration');
+      throw error;
     }
   }
-  throw Object.assign(new Error('Concurrent writes still in progress'), {
-    status: 503,
-    code: 'BLOB_WRITE_CONTENTION'
-  });
+}
+async function baseline() {
+  if (cachedBase) return cachedBase;
+  await ensureBaseline();
+  const current = await loadPrivate(BASE_PATH);
+  if (!validData(current.data)) throw storageError('INVALID_BASELINE', 'Invalid baseline data', 502);
+  cachedBase = current;
+  return current;
+}
+async function listOperations() {
+  const all = [];
+  let cursor;
+  do {
+    const page = await list({ prefix: CHANGES_PREFIX, limit: 1000, ...(cursor ? { cursor } : {}) });
+    if (!page || !Array.isArray(page.blobs)) throw storageError('STORAGE_LIST_UNAVAILABLE', 'Operation list unavailable');
+    all.push(...page.blobs);
+    if (all.length > MAX_OPERATIONS) {
+      throw storageError('STORAGE_JOURNAL_FULL', 'Journal needs controlled compaction', 507);
+    }
+    if (page.hasMore && (!page.cursor || page.cursor === cursor)) {
+      throw storageError('STORAGE_CURSOR_INVALID', 'Invalid journal cursor', 502);
+    }
+    cursor = page.hasMore ? page.cursor : null;
+  } while (cursor);
+  all.sort((a, b) => (+new Date(a.uploadedAt) - +new Date(b.uploadedAt)) ||
+    a.pathname.localeCompare(b.pathname));
+  return all;
+}
+async function loadOperation(blob) {
+  if (operationCache.has(blob.pathname)) return operationCache.get(blob.pathname);
+  const loaded = await loadPrivate(blob.pathname);
+  const op = loaded.data;
+  if (op?.format !== 'sud-change-v1' || !validData(op.base) || !validData(op.data)) {
+    throw storageError('INVALID_OPERATION', 'Invalid journal record', 502);
+  }
+  if (operationCache.size > 512) operationCache.clear();
+  operationCache.set(blob.pathname, op);
+  return op;
+}
+async function snapshot(knownEtag = null, requiredPath = null) {
+  const original = await baseline();
+  const operations = await listOperations();
+  if (requiredPath && !operations.some(item => item.pathname === requiredPath)) {
+    throw storageError('OPERATION_NOT_VISIBLE', 'New change is pending index visibility');
+  }
+  const hash = createHash('sha256').update(original.etag || 'base');
+  for (const item of operations) hash.update('\n' + item.pathname + ':' + item.etag);
+  const etag = '"' + hash.digest('hex') + '"';
+  if (knownEtag === etag) return { unchanged: true, etag };
+  let document = original.data;
+  // Apply each independent edit relative to the base that its author saw.
+  // No writer ever overwrites another writer's blob.
+  for (const item of operations) {
+    const op = await loadOperation(item);
+    document = mergeData(op.base, op.data, document).data;
+  }
+  if (!validData(document)) throw storageError('INVALID_RESULT', 'Merged state invalid', 502);
+  return { data: document, etag, count: operations.length };
+}
+
+async function appendChange(base, incoming) {
+  if (equal(base, incoming)) return snapshot();
+  const op = { format: 'sud-change-v1', base, data: incoming };
+  const fingerprint = createHash('sha256').update(JSON.stringify(op)).digest('hex');
+  const pathname = CHANGES_PREFIX + fingerprint + '.json';
+  try {
+    await put(pathname, pack(op), {
+      access: 'private',
+      allowOverwrite: false,
+      contentType: 'application/json',
+      cacheControlMaxAge: 60
+    });
+  } catch (error) {
+    if (!alreadyExists(error)) throw error;
+    // Duplicate HTTP request after a network loss: verify the immutable
+    // record instead of writing again or using an unsafe overwrite.
+    const existing = await loadPrivate(pathname);
+    if (createHash('sha256').update(JSON.stringify(existing.data)).digest('hex') !== fingerprint) {
+      throw storageError('OPERATION_ID_COLLISION', 'An existing change did not match', 409);
+    }
+  }
+  // A successful put must become visible in the authoritative list before
+  // clients mark it as synchronized. Otherwise preserve the pending local edit.
+  return snapshot(null, pathname);
 }
 
 export default async function handler(req, res) {
-  if (!['GET', 'PUT', 'PATCH'].includes(req.method)) {
-    res.setHeader('Allow', 'GET, PUT, PATCH');
-    return json(res, 405, { error: 'Nicht erlaubt' });
+  if (req.method !== 'GET' && req.method !== 'PATCH') {
+    res.setHeader('Allow', 'GET, PATCH');
+    return json(res, req.method === 'PUT' ? 426 : 405, {
+      code: 'UPDATE_REQUIRED',
+      error: 'Bitte die Anwendung neu laden, um sicher weiterarbeiten zu können.'
+    });
   }
-  if (req.method !== 'GET' &&
+  if (req.method === 'PATCH' &&
       (rejectCrossOrigin(req) || !String(req.headers['content-type'] || '').startsWith('application/json'))) {
     return json(res, 403, { error: 'Anfrage nicht erlaubt' });
   }
   if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.SUD_SESSION_SECRET || !process.env.SUD_DATA_KEY) {
-    return json(res, 503, { error: 'Speicher nicht bereit' });
+    return json(res, 503, { code: 'STORAGE_NOT_CONFIGURED', error: 'Speicher nicht bereit' });
   }
+
   try {
     const record = await readPasswordRecord();
     if (!validSession(req, record)) return json(res, 401, { error: 'Anmeldung erforderlich' });
     if (req.method === 'GET') {
       const known = req.headers['if-none-match'];
-      const remote = await readDocument(typeof known === 'string' && etagValid(known) ? known : null);
-      if (remote.unchanged) {
+      const state = await snapshot(typeof known === 'string' && known.length < 150 ? known : null);
+      if (state.unchanged) {
         res.statusCode = 304;
+        res.setHeader('ETag', state.etag);
         res.setHeader('Cache-Control', 'private, no-store, max-age=0');
-        res.setHeader('ETag', remote.etag);
         return res.end();
       }
-      if (remote.etag) res.setHeader('ETag', remote.etag);
-      return json(res, 200, remote);
+      res.setHeader('ETag', state.etag);
+      return json(res, 200, { data: state.data, etag: state.etag });
     }
 
-    const limit = req.method === 'PATCH' ? REQUEST_LIMIT : LIMIT;
-    if (Number(req.headers['content-length'] || 0) > limit) {
-      return json(res, 413, { error: 'Datei zu groß' });
+    if (Number(req.headers['content-length'] || 0) > REQUEST_LIMIT) {
+      return json(res, 413, { code: 'PAYLOAD_TOO_LARGE', error: 'Datensatz zu groß' });
     }
-    let input;
-    try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
-    catch { return json(res, 400, { error: 'Ungültiges JSON' }); }
-    if (!input || !validData(input.data) ||
-        Buffer.byteLength(JSON.stringify(input), 'utf8') > limit) {
-      return json(res, 400, { error: 'Ungültige oder zu große Einträge' });
+    const input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    if (!input || !validData(input.base) || !validData(input.data) ||
+        Buffer.byteLength(JSON.stringify(input), 'utf8') > REQUEST_LIMIT) {
+      return json(res, 400, { error: 'Ungültiger Datenstand' });
     }
-    if (req.method === 'PATCH') {
-      if (!validData(input.base)) return json(res, 400, { error: 'Gemeinsame Ausgangsversion fehlt' });
-      const merged = await mergeAndWrite(input.base, input.data);
-      return json(res, 200, { ok: true, ...merged });
-    }
-
-    // Compatibility for already opened legacy tabs. ETags remain mandatory
-    // on overwrites, so an outdated tab cannot silently discard cloud changes.
-    if (!etagValid(input.etag ?? null)) return json(res, 400, { error: 'Ungültige Datenversion' });
-    try {
-      const saved = await writeDocument(input.data, input.etag ?? null);
-      return json(res, 200, { ok: true, etag: saved.etag });
-    } catch (error) {
-      if (isConflict(error)) return json(res, 409, { error: 'Die Daten wurden inzwischen geändert. Seite neu laden.' });
-      throw error;
-    }
+    const saved = await appendChange(input.base, input.data);
+    return json(res, 200, { ok: true, data: saved.data, etag: saved.etag, conflictCount: 0 });
   } catch (error) {
-    if (typeof error.status === 'number') {
-      if (error.status === 503 || error.status === 502) res.setHeader('Retry-After', '15');
+    if (error?.status) {
+      if (error.status === 503) res.setHeader('Retry-After', '5');
       return json(res, error.status, {
-        code: error.code || (error.status === 503 ? 'STORAGE_UNAVAILABLE' : 'STORAGE_ERROR'),
-        error: error.status === 503
-          ? 'Gleichzeitige Änderungen blockieren derzeit die Speicherung. Lokale Änderungen bleiben erhalten.'
-          : error.status === 502
-            ? 'Vercel Blob hat die aktuelle Datenversion abgelehnt. Lokale Änderungen bleiben erhalten.'
-            : error.status === 413 ? 'Datensatz zu groß' : 'Daten nicht verfügbar'
+        code: error.code,
+        error: error.status >= 500
+          ? 'Cloud ist momentan nicht erreichbar. Änderungen bleiben lokal erhalten.'
+          : error.message
       });
     }
-    console.error('Data operation failed:', error?.name || 'UnknownError');
-    return json(res, 500, { error: 'Speichern gerade nicht möglich' });
+    console.error('SUD journal operation failed:', error?.name || 'UnknownError');
+    res.setHeader('Retry-After', '10');
+    return json(res, 503, {
+      code: 'STORAGE_REQUEST_FAILED',
+      error: 'Cloud-Speicherung fehlgeschlagen. Änderungen bleiben lokal erhalten.'
+    });
   }
 }
