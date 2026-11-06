@@ -46,13 +46,22 @@ export default async function handler(req, res) {
     const record = await readPasswordRecord();
     if (!validSession(req, record)) return json(res, 401, { error: 'Anmeldung erforderlich' });
     if (req.method === 'GET') {
-      const file = await get(PATH, { access: 'private', useCache: false });
+      const knownEtag = req.headers['if-none-match'];
+      const file = await get(PATH, { access: 'private', useCache: false,
+        ...(typeof knownEtag === 'string' && knownEtag.length < 201 ? { ifNoneMatch: knownEtag } : {}) });
+      if (file?.statusCode === 304) {
+        res.statusCode = 304;
+        res.setHeader('Cache-Control', 'private, no-store, max-age=0');
+        res.setHeader('ETag', file.blob.etag);
+        return res.end();
+      }
       if (!file || file.statusCode === 404) return json(res, 200, { data: null, etag: null });
       if (file.statusCode !== 200 || !file.stream) return json(res, 502, { error: 'Daten nicht verfügbar' });
       const raw = await new Response(file.stream).text();
       if (raw.length > LIMIT * 2) return json(res, 502, { error: 'Datensatz zu groß' });
       const data = unpack(raw);
       if (!validData(data)) return json(res, 502, { error: 'Ungültiger Datensatz' });
+      res.setHeader('ETag', file.blob.etag);
       return json(res, 200, { data, etag: file.blob.etag });
     }
     if (Number(req.headers['content-length'] || 0) > LIMIT) return json(res, 413, { error: 'Datei zu groß' });
