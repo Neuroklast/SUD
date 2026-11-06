@@ -17,6 +17,7 @@ function harness() {
   let stored = null;
   let sequence = 0;
   let failNextWrite = false;
+  let rejectAllWrites = false;
   class BlobPreconditionFailedError extends Error {}
 
   async function get(path, options) {
@@ -29,9 +30,13 @@ function harness() {
     return { statusCode: 200, stream: new Response(stored.text).body,
       blob: { etag: stored.etag } };
   }
+  async function head(path) {
+    assert.equal(path, 'sud/timeline-v2.json');
+    return stored ? { etag: stored.etag } : null;
+  }
   async function put(path, payload, options) {
     assert.equal(path, 'sud/timeline-v2.json');
-    if (failNextWrite) {
+    if (failNextWrite || rejectAllWrites) {
       failNextWrite = false;
       throw new BlobPreconditionFailedError('precondition failed');
     }
@@ -49,7 +54,7 @@ function harness() {
   }
   const context = {
     Buffer, Response, setTimeout, randomBytes, createCipheriv, createDecipheriv,
-    get, put, BlobPreconditionFailedError,
+    get, put, head, BlobPreconditionFailedError,
     process: { env: {
       BLOB_READ_WRITE_TOKEN: 'test',
       SUD_SESSION_SECRET: 'test-secret',
@@ -78,7 +83,8 @@ function harness() {
       headers: res.headers };
   }
   return { request, get writes() { return sequence; },
-    collideOnce() { failNextWrite = true; } };
+    collideOnce() { failNextWrite = true; },
+    rejectEveryWrite() { rejectAllWrites = true; } };
 }
 
 test('server merges independently edited events without returning a browser 409', async () => {
@@ -124,6 +130,18 @@ test('server retries a storage precondition failure internally', async () => {
     { base: empty(), data: doc([item('added')]) });
   assert.equal(response.status, 200);
   assert.equal((await api.request('GET')).body.data.events.length, 1);
+});
+
+test('permanent CAS mismatch has a bounded 502 error instead of repeated 503s', async () => {
+  const api = harness();
+  api.rejectEveryWrite();
+  const response = await api.request('PATCH', {
+    base: empty(),
+    data: doc([item('check')])
+  });
+  assert.equal(response.status, 502);
+  assert.equal(response.body.code, 'BLOB_CAS_INCONSISTENT');
+  assert.equal(api.writes, 0);
 });
 
 test('conditional GET returns 304 only for the current ETag', async () => {

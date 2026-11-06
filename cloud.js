@@ -79,6 +79,8 @@
     if (!response.ok) {
       const error = new Error(body.error || 'Verbindung fehlgeschlagen (' + response.status + ')');
       error.status = response.status;
+      error.code = body.code || null;
+      error.retryAfter = Number(response.headers.get('Retry-After')) || 0;
       if (response.status === 401 && path === '/api/data') {
         loggedIn = false;
         ready = false;
@@ -200,7 +202,13 @@
       failed = true;
       dirty = true;
       storeSyncState();
-      status('Speichern ausstehend. Verbindung wird automatisch erneut versucht.', false);
+      if (error.code === 'BLOB_CAS_INCONSISTENT') {
+        status('Cloud lehnt aktuelle Dateiversion ab. Änderungen sind lokal gesichert.', false);
+        retryDelay = Math.max(retryDelay, 30000);
+      } else {
+        status(error.message || 'Cloud-Speicherung ausstehend. Erneuter Versuch folgt.', false);
+      }
+      if (error.retryAfter) retryDelay = Math.max(retryDelay, error.retryAfter * 1000);
     } finally {
       writing = false;
       if (dirty && ready && loggedIn && navigator.onLine) {
