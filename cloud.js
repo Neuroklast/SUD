@@ -167,6 +167,7 @@
   async function save() {
     if (writing || refreshing || !ready || !loggedIn || !dirty) return;
     writing = true;
+    let failed = false;
     clearTimeout(autosaveTimer);
     const startRevision = revision;
     const startDocument = snapshot(data);
@@ -200,7 +201,7 @@
       const current = snapshot(data);
       const next = revision === startRevision ? working :
         normalize(sync.mergeData(startDocument, current, working).data);
-      applyDocument(next, revision !== startRevision || !sync.equal(current, next));
+      applyDocument(next, true);
       dirty = !sync.equal(next, baseSnapshot);
       storeSyncState();
       status(dirty ? 'Weitere Änderungen werden gespeichert …' :
@@ -210,15 +211,15 @@
       channel?.postMessage({ type: 'updated' });
     } catch (error) {
       if (error.status === 401) return;
+      failed = true;
       status(error.status === 409
         ? 'Gleichzeitige Änderungen. Automatischer neuer Versuch …'
         : 'Cloud nicht erreichbar. Änderungen bleiben lokal und werden erneut versucht.', false);
       dirty = true;
       storeSyncState();
-      queueSave(6000);
     } finally {
       writing = false;
-      if (dirty && ready && loggedIn) queueSave(1000);
+      if (dirty && ready && loggedIn) queueSave(failed ? 6000 : 1000);
     }
   }
 
