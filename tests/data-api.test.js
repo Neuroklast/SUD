@@ -17,6 +17,7 @@ function harness() {
   let stored = null;
   let sequence = 0;
   let failNextWrite = false;
+  let rejectAllWrites = false;
   class BlobPreconditionFailedError extends Error {}
 
   async function get(path, options) {
@@ -35,7 +36,7 @@ function harness() {
   }
   async function put(path, payload, options) {
     assert.equal(path, 'sud/timeline-v2.json');
-    if (failNextWrite) {
+    if (failNextWrite || rejectAllWrites) {
       failNextWrite = false;
       throw new BlobPreconditionFailedError('precondition failed');
     }
@@ -82,7 +83,8 @@ function harness() {
       headers: res.headers };
   }
   return { request, get writes() { return sequence; },
-    collideOnce() { failNextWrite = true; } };
+    collideOnce() { failNextWrite = true; },
+    rejectEveryWrite() { rejectAllWrites = true; } };
 }
 
 test('server merges independently edited events without returning a browser 409', async () => {
@@ -130,19 +132,18 @@ test('server retries a storage precondition failure internally', async () => {
   assert.equal((await api.request('GET')).body.data.events.length, 1);
 });
 
-test('persistent CAS mismatch is classified as a storage fault, not endless 503 retries', async () => {
+test('permanent CAS mismatch has a bounded 502 error instead of repeated 503s', async () => {
   const api = harness();
-  api.collideOnce();
+  api.rejectEveryWrite();
   const response = await api.request('PATCH', {
     base: empty(),
     data: doc([item('check')])
   });
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 502);
+  assert.equal(response.body.code, 'BLOB_CAS_INCONSISTENT');
+  assert.equal(api.writes, 0);
 });
 
-// Non-concurrency precondition failures must not be falsely reported as
-// ordinary simultaneous editing. We also test this through a source-level
-// mismatch in the standalone merge routine when running the repository suite.
 test('conditional GET returns 304 only for the current ETag', async () => {
   const api = harness();
   const saved = await api.request('PATCH', { base: empty(), data: doc([item('a')]) });
