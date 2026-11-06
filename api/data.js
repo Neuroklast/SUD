@@ -94,10 +94,16 @@ async function mergeAndWrite(base, incoming) {
         // head() reads the current metadata without any document content.
         latest = await head(PATH);
       } catch (metadataError) {
-        console.warn('SUD storage metadata check failed', metadataError?.name || 'Unknown');
-        throw Object.assign(new Error('Storage metadata unavailable'), { status: 502 });
+        // A first upload has no metadata yet; a failed create with no object
+        // is not a competing editor and should not loop indefinitely.
+        if (metadataError?.name === 'BlobNotFoundError') latest = null;
+        else {
+          console.warn('SUD storage metadata check failed', metadataError?.name || 'Unknown');
+          throw Object.assign(new Error('Storage metadata unavailable'), { status: 502 });
+        }
       }
-      const sameEtag = Boolean(cloud.etag && latest?.etag === cloud.etag);
+      const sameEtag = latest?.etag === cloud.etag ||
+        (cloud.etag === null && latest === null);
       if (sameEtag) unchangedEtagFailures++;
       else unchangedEtagFailures = 0;
       if (unchangedEtagFailures >= 2) {
