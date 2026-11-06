@@ -139,9 +139,12 @@ async function loadOperation(blob) {
   operationCache.set(blob.pathname, op);
   return op;
 }
-async function snapshot(knownEtag = null) {
+async function snapshot(knownEtag = null, requiredPath = null) {
   const original = await baseline();
   const operations = await listOperations();
+  if (requiredPath && !operations.some(item => item.pathname === requiredPath)) {
+    throw storageError('OPERATION_NOT_VISIBLE', 'New change is pending index visibility');
+  }
   const hash = createHash('sha256').update(original.etag || 'base');
   for (const item of operations) hash.update('\n' + item.pathname + ':' + item.etag);
   const etag = '"' + hash.digest('hex') + '"';
@@ -178,14 +181,9 @@ async function appendChange(base, incoming) {
       throw storageError('OPERATION_ID_COLLISION', 'An existing change did not match', 409);
     }
   }
-  const latest = await snapshot();
   // A successful put must become visible in the authoritative list before
   // clients mark it as synchronized. Otherwise preserve the pending local edit.
-  const listed = await listOperations();
-  if (!listed.some(item => item.pathname === pathname)) {
-    throw storageError('OPERATION_NOT_VISIBLE', 'New change is pending index visibility', 503);
-  }
-  return latest;
+  return snapshot(null, pathname);
 }
 
 export default async function handler(req, res) {
