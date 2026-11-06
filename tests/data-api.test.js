@@ -48,7 +48,7 @@ function harness() {
     return { etag: stored.etag };
   }
   const context = {
-    Buffer, Response, randomBytes, createCipheriv, createDecipheriv,
+    Buffer, Response, setTimeout, randomBytes, createCipheriv, createDecipheriv,
     get, put, BlobPreconditionFailedError,
     process: { env: {
       BLOB_READ_WRITE_TOKEN: 'test',
